@@ -1,0 +1,20 @@
+{
+  "name": "claude-session-viewer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Wire a React UI to Claude Code sessions: watch the decision map live, investigate past sessions, and export an agent-readable review.",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "dev": "concurrently -n server,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w web",
+    "start": "npm run start -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

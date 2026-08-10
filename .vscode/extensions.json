@@ -1,0 +1,4 @@
+{
+  "// note": "Optional. VS Code's built-in TypeScript/React support already covers this project — Vite needs no extension. Prettier is a nice-to-have for auto-formatting.",
+  "recommendations": ["esbenp.prettier-vscode"]
+}
