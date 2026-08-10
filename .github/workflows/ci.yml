@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install (workspaces)
+        run: npm ci
+      - name: Compatibility preflight
+        run: npm run check
+      - name: Typecheck server
+        run: npx tsc -p server/tsconfig.json --noEmit
+      - name: Build web
+        run: npm run build
