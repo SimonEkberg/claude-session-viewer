@@ -4,3 +4,6 @@ dist/
 *.tsbuildinfo
 .env
 .DS_Store
+
+# personal study / demo docs — excluded from the repo on purpose
+docs-personal/
