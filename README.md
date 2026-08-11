@@ -85,30 +85,74 @@ By default the server binds **loopback only** (`127.0.0.1`), so it's reachable o
 
 ## Phone access over Tailscale (remote mode)
 
-Reach the viewer from your phone with the laptop left running — **privately, over your tailnet, with identity auth**. No public exposure, no port-forwarding.
+Reach the viewer from your phone with the laptop left on — **privately, over your tailnet, with identity auth**. No public exposure, no port-forwarding. The app is gated by your Tailscale identity: Tailscale injects a `Tailscale-User-Login` header it **strips from any client-supplied value** (so it can't be forged), and the app admits only logins in `ALLOWED_LOGINS`.
 
-Prereqs: laptop + phone on the **same Tailscale tailnet**, MagicDNS on.
+### A. One-time setup
+
+1. **Install Tailscale** on the laptop and phone; sign in with the **same account** so both join one tailnet. Verify:
+   ```bash
+   tailscale status      # should list both devices, same owner, nobody else
+   ```
+2. In the **Tailscale admin console → DNS** (<https://login.tailscale.com/admin/dns>) enable both:
+   - **MagicDNS** (gives your machine a name)
+   - **HTTPS Certificates** (required for the `https://` URL — without it, cert provisioning fails and the page times out)
+3. Find your **machine's name** and **login** (needed below):
+   ```bash
+   tailscale status --json     # Self.DNSName  ->  https://<machine>.<tailnet>.ts.net
+                               # your login    ->  the tailnet owner, e.g. you@example.com
+   ```
+4. **Windows:** if `tailscale` isn't recognized in your terminal, add it to PATH (new terminals):
+   ```powershell
+   [Environment]::SetEnvironmentVariable('Path', ([Environment]::GetEnvironmentVariable('Path','User').TrimEnd(';') + ';C:\Program Files\Tailscale'), 'User')
+   ```
+   …or just prefix commands with `& "C:\Program Files\Tailscale\tailscale.exe"`.
+
+### B. Every time you want phone access
+
+1. **Build the UI** (once, and after any code change):
+   ```bash
+   npm run build
+   ```
+2. **Start the gated server** on loopback and leave the terminal open (this is your "always-on"):
+   ```powershell
+   # PowerShell (Windows)
+   $env:AUTH_MODE="tailscale"; $env:ALLOWED_LOGINS="you@example.com"; npm start
+   ```
+   ```bash
+   # bash/zsh (macOS/Linux)
+   AUTH_MODE=tailscale ALLOWED_LOGINS=you@example.com npm start
+   ```
+3. **Expose it to your tailnet** over HTTPS (background; run in a second terminal):
+   ```bash
+   tailscale serve --bg 3737
+   tailscale serve status         # expect: https://<machine>.<tailnet>.ts.net -> 127.0.0.1:3737
+   ```
+4. **On your phone** (Tailscale connected), open **`https://<machine>.<tailnet>.ts.net`**. You're logged in automatically by your Tailscale identity — your sessions appear.
+
+### C. Gotchas (all seen in practice)
+
+- **First HTTPS load can take 10–30 s** while the cert provisions. Wait and retry.
+- **`https://` times out?** HTTPS Certificates probably isn't enabled (step A2). Either enable it, **or** serve over plain HTTP instead — still private (the tailnet is WireGuard-encrypted), just no public cert:
+  ```bash
+  tailscale serve reset
+  tailscale serve --bg --http=80 3737     # then open  http://<machine>.<tailnet>.ts.net
+  ```
+- **`localhost:3737` returns `401 unauthorized` — that's correct.** With the gate on there is no local bypass by design; use the `…ts.net` URL on the laptop too.
+- **Stop serving:** `tailscale serve reset`.
+- **Never** run `tailscale funnel` — that exposes it to the public internet. Serve is tailnet-only.
+- This is a solid posture for a **private, single-user tailnet**. For a shared tailnet, add a per-device ACL and consider the passkey/OIDC + per-action step-up upgrade (see Security).
+
+### D. Run it purely locally (no Tailscale, no login)
+
+The gate is **off by default** — just start without `AUTH_MODE`:
 
 ```bash
-# 1. Build the UI (once, and after code changes)
-npm run build
-
-# 2. Start the gated single-server on loopback. It requires YOUR Tailscale identity.
-#    PowerShell:
-$env:AUTH_MODE="tailscale"; $env:ALLOWED_LOGINS="you@example.com"; npm start
-#    bash/zsh:
-AUTH_MODE=tailscale ALLOWED_LOGINS=you@example.com npm start
-
-# 3. Expose it to your tailnet over HTTPS (background, survives reboots)
-tailscale serve --bg 3737
+npm run dev     # http://localhost:5273  (hot reload, for editing)
+# or
+npm start       # http://localhost:3737  (built UI)
 ```
 
-On your phone (joined to the tailnet), open your MagicDNS URL — e.g. `https://<machine>.<tailnet>.ts.net`. Tailscale terminates TLS and injects your identity (`Tailscale-User-Login`, which it **strips from any client-supplied value**, so it can't be forged); the app allows only logins in `ALLOWED_LOGINS`.
-
-- **Check / stop:** `tailscale serve status` · `tailscale serve reset`
-- **Never** use `tailscale funnel` — that's public. Serve is tailnet-only.
-- Access it via the `…ts.net` URL from the laptop too, so there's no unauthenticated local bypass.
-- This is the recommended interim posture for a **private single-user tailnet**. For a shared tailnet, add a per-device ACL, and consider the passkey/OIDC + per-action step-up upgrade (see the security review).
+Local and remote modes share port **3737**, so run **one at a time** — stop one before starting the other.
 
 ## Honest scope
 
