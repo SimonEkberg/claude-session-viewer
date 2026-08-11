@@ -1,7 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import chokidar from 'chokidar';
-import { PORT, HOST, CORS_ORIGINS, SESSIONS_ROOT } from './config.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PORT, HOST, CORS_ORIGINS, SESSIONS_ROOT, AUTH_MODE, ALLOWED_LOGINS } from './config.js';
 import { deleteSession, findFile, getSession, listProjects, listSessions, loadFile } from './index-store.js';
 import { buildReview, reviewToMarkdown } from './review.js';
 import { launchSession, resumeSession } from './launch.js';
@@ -14,6 +17,23 @@ const app = express();
 // sites). Same-origin / no-Origin requests (the Vite proxy, curl) are unaffected.
 app.use(cors({ origin: CORS_ORIGINS, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
+
+// Tailscale-identity gate (enabled with AUTH_MODE=tailscale). Gates EVERY request
+// — the UI and the API — so viewing is protected too, not just mutations. The
+// header is set by `tailscale serve` and cannot be forged from the tailnet.
+if (AUTH_MODE === 'tailscale') {
+  if (ALLOWED_LOGINS.length === 0) {
+    console.warn('  auth: AUTH_MODE=tailscale but ALLOWED_LOGINS is empty — DENYING ALL requests (set ALLOWED_LOGINS).');
+  }
+  app.use((req, res, next) => {
+    const login = String(req.header('Tailscale-User-Login') || '').toLowerCase();
+    if (login && ALLOWED_LOGINS.includes(login)) {
+      (req as express.Request & { tsUser?: string }).tsUser = login;
+      return next();
+    }
+    res.status(401).json({ error: 'unauthorized — Tailscale identity required' });
+  });
+}
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, sessionsRoot: SESSIONS_ROOT });
@@ -173,6 +193,19 @@ app.get('/api/activity/stream', (req, res) => {
     activityBus.off('change', onChange);
   });
 });
+
+// Serve the built web app so ONE server (this one) hosts both the UI and the API
+// on a single origin — the right shape for `tailscale serve` / a persistent deploy.
+// (In dev you still use Vite on :5273; this only kicks in after `npm run build`.)
+const WEB_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
+if (fs.existsSync(WEB_DIST)) {
+  app.use(express.static(WEB_DIST));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(WEB_DIST, 'index.html'));
+  });
+  console.log(`  serving web UI from: ${WEB_DIST}`);
+}
 
 app.listen(PORT, HOST, () => {
   console.log(`claude-session-viewer server on http://${HOST}:${PORT}`);

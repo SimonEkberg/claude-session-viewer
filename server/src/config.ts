@@ -23,6 +23,17 @@ export const CORS_ORIGINS = (
   process.env.CORS_ORIGINS || 'http://localhost:5273,http://127.0.0.1:5273'
 ).split(',').map((s) => s.trim()).filter(Boolean);
 
+/**
+ * Auth. `off` (default) = no gate, for local loopback dev. `tailscale` = require a
+ * `Tailscale-User-Login` header whose value is in ALLOWED_LOGINS. That header is
+ * injected by `tailscale serve` and STRIPPED from any client-supplied value by
+ * Tailscale, so a remote caller can't forge it. Fails closed: if ALLOWED_LOGINS is
+ * empty in tailscale mode, every request is denied.
+ */
+export const AUTH_MODE = (process.env.AUTH_MODE || 'off').toLowerCase();
+export const ALLOWED_LOGINS = (process.env.ALLOWED_LOGINS || '')
+  .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+
 /** Path to the Claude Code CLI used to launch new sessions. */
 export const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 
