@@ -17,6 +17,9 @@ export function App() {
   const [loading, setLoading] = useState(true);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // On phones/tablets we show either the list or the detail, not both. Desktop
+  // (>~820px) ignores this via CSS and shows both.
+  const [mobilePane, setMobilePane] = useState<'list' | 'detail'>('list');
   const [session, setSession] = useState<FullSession | null>(null);
   const [tab, setTab] = useState<Tab>('timeline');
   const [live, setLive] = useState(false);
@@ -102,6 +105,7 @@ export function App() {
       setFocus(null);
       setTab('timeline');
       setSelectedId(id);
+      setMobilePane('detail');
       setSession(null);
       try {
         setSession(await api.session(id));
@@ -152,6 +156,7 @@ export function App() {
         setLive(false);
         setSelectedId(null);
         setSession(null);
+        setMobilePane('list');
       }
       await refreshList();
     },
@@ -161,7 +166,7 @@ export function App() {
   const defaultCwd = session?.cwd || projects[0]?.cwdGuess || '';
 
   return (
-    <div className="app">
+    <div className={`app mobile-${mobilePane}`}>
       <Sidebar
         sessions={sessions}
         projects={projects}
@@ -191,6 +196,7 @@ export function App() {
               session={session}
               live={live}
               working={working}
+              onBack={() => setMobilePane('list')}
               onToggleLive={toggleLive}
               tab={tab}
               onTab={setTab}

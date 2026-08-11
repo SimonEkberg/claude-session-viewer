@@ -19,6 +19,7 @@ export function SessionHeader({
   session,
   live,
   working,
+  onBack,
   onToggleLive,
   tab,
   onTab,
@@ -28,6 +29,7 @@ export function SessionHeader({
   session: FullSession;
   live: boolean;
   working: boolean;
+  onBack: () => void;
   onToggleLive: () => void;
   tab: Tab;
   onTab: (t: Tab) => void;
@@ -46,6 +48,9 @@ export function SessionHeader({
   return (
     <header className="session-header">
       <div className="sh-title-row">
+        <button className="mobile-back" onClick={onBack} title="Back to sessions">
+          ‹ Sessions
+        </button>
         <h1 title={session.id}>{session.title}</h1>
         <div className="sh-status">
           {live && (

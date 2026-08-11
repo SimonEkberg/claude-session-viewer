@@ -1379,3 +1379,185 @@ body {
 .pad {
   padding: 16px;
 }
+
+/* ============================================================
+   Responsive — phones & tablets
+   Desktop shows sidebar + detail side by side. On <=820px we
+   show one pane at a time (master–detail) with a back button.
+   ============================================================ */
+.mobile-back {
+  display: none; /* desktop: hidden; the mobile query below shows it */
+  flex: none;
+  align-items: center;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 6px 11px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+@media (max-width: 820px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+  /* master–detail: exactly one pane visible */
+  .app.mobile-list .main {
+    display: none;
+  }
+  .app.mobile-detail .sidebar {
+    display: none;
+  }
+  .sidebar {
+    border-right: none;
+  }
+  .mobile-back {
+    display: inline-flex;
+  }
+
+  /* Sidebar: bigger tap targets; delete visible (no hover on touch) */
+  .search,
+  .project-select {
+    margin: 0 12px 8px;
+    padding: 10px 12px;
+    font-size: 15px;
+  }
+  .si-main {
+    padding: 12px;
+  }
+  .si-title {
+    font-size: 14px;
+  }
+  .si-delete {
+    opacity: 0.6;
+    top: 9px;
+    right: 8px;
+    padding: 7px 9px;
+    font-size: 15px;
+  }
+
+  /* Header: tighter; scroll the busy rows instead of overflowing */
+  .session-header {
+    padding: 12px 14px 0;
+  }
+  .sh-title-row {
+    gap: 10px;
+  }
+  .sh-title-row h1 {
+    font-size: 15px;
+    flex: 1;
+    min-width: 0;
+  }
+  .sh-meta {
+    gap: 10px;
+    font-size: 11px;
+  }
+  .stat-row,
+  .tool-badges,
+  .tabs,
+  .filters,
+  .usage-tokens,
+  .usage-windows {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .stat-row::-webkit-scrollbar,
+  .tool-badges::-webkit-scrollbar,
+  .tabs::-webkit-scrollbar,
+  .filters::-webkit-scrollbar {
+    display: none;
+  }
+  .tool-badges {
+    flex-wrap: nowrap;
+  }
+  .stat,
+  .tool-badge,
+  .tab,
+  .chip {
+    flex: none;
+  }
+  .ctx-meter {
+    max-width: none;
+  }
+
+  /* Timeline: narrower rail gutter, room for cards */
+  .timeline {
+    padding: 10px 12px 96px;
+  }
+  .node {
+    grid-template-columns: 34px 1fr;
+    gap: 8px;
+  }
+  .node.sidechain .body {
+    margin-left: 8px;
+    padding-left: 10px;
+  }
+  .ts {
+    font-size: 9px;
+  }
+
+  /* Files: drop the long path column on small screens */
+  .files-panel {
+    padding: 12px 14px;
+  }
+  .file-row {
+    grid-template-columns: 92px 1fr auto;
+    gap: 8px;
+  }
+  .file-path {
+    display: none;
+  }
+
+  /* Follow-up composer: stack controls, full-width inputs */
+  .followup {
+    padding: 8px 12px 10px;
+  }
+  .followup-controls {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .ctl {
+    flex: 1 1 44%;
+  }
+  .ctl select {
+    width: 100%;
+  }
+  .followup-input {
+    font-size: 16px; /* >=16px stops iOS zoom-on-focus */
+  }
+
+  /* Modals: near-full width, single-column rows, no input zoom */
+  .modal {
+    width: 96vw;
+    padding: 16px;
+  }
+  .diff-modal,
+  .modal.browser {
+    width: 97vw;
+  }
+  .row2 {
+    grid-template-columns: 1fr;
+  }
+  .modal textarea,
+  .modal input,
+  .modal select {
+    font-size: 16px;
+  }
+  .cwd-row {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 480px) {
+  .sh-title-row h1 {
+    font-size: 14px;
+  }
+  .stat-n {
+    font-size: 17px;
+  }
+  .empty-logo {
+    font-size: 40px;
+  }
+}
