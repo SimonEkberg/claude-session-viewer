@@ -13,6 +13,15 @@ function costLabel(u: SessionUsage): string {
   return usd(u.costUsd);
 }
 
+// Whether the current focus is the same one a stat/badge would set — used to make
+// each stat/badge a toggle (click again to deselect).
+function sameFocus(a: Focus | null, b: Focus): boolean {
+  if (!a || a.type !== b.type) return false;
+  if (a.type === 'kind' && b.type === 'kind') return a.kind === b.kind;
+  if (a.type === 'tool' && b.type === 'tool') return a.tool === b.tool;
+  return true; // 'prompts' | 'errors' have no extra discriminator
+}
+
 type Tab = 'timeline' | 'files' | 'review';
 
 export function SessionHeader({
@@ -44,6 +53,14 @@ export function SessionHeader({
   // A stat is "active" when the timeline is currently focused on it (and we're on the timeline tab).
   const activeKind = tab === 'timeline' && focus?.type === 'kind' ? focus.kind : null;
   const activeSpecial = tab === 'timeline' ? focus?.type : null;
+
+  // Set the focus, or clear it if it's already the active one (click-to-toggle).
+  // The "clear" banner in the timeline still works too.
+  const applyFocus = (f: Focus) => {
+    const isActive = tab === 'timeline' && sameFocus(focus, f);
+    onTab('timeline');
+    onInspect(isActive ? null : f);
+  };
 
   return (
     <header className="session-header">
@@ -85,11 +102,11 @@ export function SessionHeader({
       </div>
 
       <div className="stat-row">
-        <Stat n={c.prompts} label="prompts" active={activeSpecial === 'prompts'} onClick={() => { onTab('timeline'); onInspect({ type: 'prompts', label: 'Prompts' }); }} />
-        <Stat n={c.reasoning} label="reasoning" active={activeKind === 'reasoning'} onClick={() => { onTab('timeline'); onInspect({ type: 'kind', kind: 'reasoning', label: 'Reasoning' }); }} />
-        <Stat n={c.toolCalls} label="tool calls" active={activeKind === 'tool_call'} onClick={() => { onTab('timeline'); onInspect({ type: 'kind', kind: 'tool_call', label: 'Tool calls' }); }} />
-        <Stat n={session.filesTouched.length} label="files" active={tab === 'files'} onClick={() => onTab('files')} />
-        {c.errors > 0 && <Stat n={c.errors} label="errors" bad active={activeSpecial === 'errors'} onClick={() => { onTab('timeline'); onInspect({ type: 'errors', label: 'Errors' }); }} />}
+        <Stat n={c.prompts} label="prompts" active={activeSpecial === 'prompts'} onClick={() => applyFocus({ type: 'prompts', label: 'Prompts' })} />
+        <Stat n={c.reasoning} label="reasoning" active={activeKind === 'reasoning'} onClick={() => applyFocus({ type: 'kind', kind: 'reasoning', label: 'Reasoning' })} />
+        <Stat n={c.toolCalls} label="tool calls" active={activeKind === 'tool_call'} onClick={() => applyFocus({ type: 'kind', kind: 'tool_call', label: 'Tool calls' })} />
+        <Stat n={session.filesTouched.length} label="files" active={tab === 'files'} onClick={() => onTab(tab === 'files' ? 'timeline' : 'files')} />
+        {c.errors > 0 && <Stat n={c.errors} label="errors" bad active={activeSpecial === 'errors'} onClick={() => applyFocus({ type: 'errors', label: 'Errors' })} />}
         <Stat
           n={costLabel(u)}
           label={`${tokens(u.totalTokens)} tokens`}
@@ -107,7 +124,7 @@ export function SessionHeader({
           <button
             key={t}
             className={`tool-badge clickable ${focus?.type === 'tool' && focus.tool === t && tab === 'timeline' ? 'active' : ''}`}
-            onClick={() => { onTab('timeline'); onInspect({ type: 'tool', tool: t, label: t }); }}
+            onClick={() => applyFocus({ type: 'tool', tool: t, label: t })}
           >
             {t} <b>{n}</b>
           </button>
