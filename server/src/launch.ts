@@ -1,9 +1,28 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { CLAUDE_BIN, SESSIONS_ROOT, projectSlug } from './config.js';
 import { markActive, markInactive } from './activity.js';
+
+function isDir(p: string): boolean {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Transcript paths of freshly-launched sessions whose file the CLI hasn't created
+ * yet. The stream route consults this so it can watch the expected path and begin
+ * tailing the moment the file appears, instead of 404ing during CLI startup.
+ */
+const pendingPaths = new Map<string, string>();
+export function expectedFilePath(id: string): string | undefined {
+  return pendingPaths.get(id);
+}
 
 /**
  * Wire a spawned child's lifetime to the session's active state, and quiet the
@@ -78,6 +97,10 @@ export function launchSession(req: LaunchRequest): LaunchResult {
   validateModelMode(req.model, req.permissionMode);
   const id = crypto.randomUUID();
   const cwd = req.cwd || os.homedir();
+  // Validate up front: an invalid cwd makes spawn fail ASYNChronously (ENOENT on the
+  // 'error' event) after we've already told the client spawned:true — i.e. the prompt
+  // is silently lost. Fail synchronously with a clear 400 instead.
+  if (!isDir(cwd)) throw new Error(`working directory does not exist: ${cwd}`);
   const projectDir = projectSlug(cwd);
   const filePath = path.join(SESSIONS_ROOT, projectDir, `${id}.jsonl`);
 
@@ -87,7 +110,9 @@ export function launchSession(req: LaunchRequest): LaunchResult {
   if (req.model) args.push('--model', req.model);
   if (req.permissionMode) args.push('--permission-mode', req.permissionMode);
 
-  const command = `${CLAUDE_BIN} ${args.map(quoteArg).join(' ')}`;
+  // CLAUDE_BIN is quoted too: a real install path with spaces (C:\Program Files\…\
+  // claude.cmd) would otherwise split into a wrong argv and the launch would fail.
+  const command = `${quoteArg(CLAUDE_BIN)} ${args.map(quoteArg).join(' ')}`;
 
   if (req.dryRun) {
     return { id, cwd, projectDir, filePath, command, spawned: false };
@@ -98,6 +123,7 @@ export function launchSession(req: LaunchRequest): LaunchResult {
   const child = spawn(command, { cwd, shell: true, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   feedPrompt(child, req.prompt);
   trackChild(child, id, 'launch');
+  pendingPaths.set(id, filePath); // let the stream route tail it before the file exists
 
   return { id, cwd, projectDir, filePath, command, spawned: true };
 }
@@ -125,13 +151,14 @@ export function resumeSession(id: string, req: ResumeRequest): ResumeResult {
   if (!req.prompt?.trim()) throw new Error('prompt is required');
   if (!id) throw new Error('session id is required');
   validateModelMode(req.model, req.permissionMode);
+  if (!isDir(req.cwd)) throw new Error(`working directory does not exist: ${req.cwd}`);
 
   // Prompt piped via stdin (see feedPrompt); only safe flag tokens on the command line.
   const args = ['-p', '--resume', id, '--output-format', 'stream-json', '--verbose'];
   if (req.model) args.push('--model', req.model);
   if (req.permissionMode) args.push('--permission-mode', req.permissionMode);
 
-  const command = `${CLAUDE_BIN} ${args.map(quoteArg).join(' ')}`;
+  const command = `${quoteArg(CLAUDE_BIN)} ${args.map(quoteArg).join(' ')}`;
   if (req.dryRun) return { id, command, spawned: false };
 
   const child = spawn(command, { cwd: req.cwd, shell: true, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -155,7 +182,11 @@ export function validateModelMode(model?: string, permissionMode?: string): void
     throw new Error(`invalid permissionMode: ${permissionMode}`);
 }
 
+// Quote for spawn(command, { shell: true }), which on Windows is cmd.exe. The safe
+// charset (flags, UUIDs, validated model ids, install paths without spaces) passes
+// through verbatim; anything else is wrapped in double quotes with embedded quotes
+// doubled — cmd.exe's own convention (NOT POSIX backslash-escaping).
 function quoteArg(a: string): string {
   if (/^[A-Za-z0-9_\-./:\\]+$/.test(a)) return a;
-  return `"${a.replace(/(["\\$`])/g, '\\$1')}"`;
+  return `"${a.replace(/"/g, '""')}"`;
 }

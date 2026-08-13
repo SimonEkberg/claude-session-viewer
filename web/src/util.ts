@@ -40,6 +40,32 @@ export function tokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
+/**
+ * Copy text to the clipboard, with a fallback for non-secure contexts.
+ * navigator.clipboard is undefined over plain http:// (e.g. a phone hitting
+ * http://192.168.x.x — the LAN/mobile case this app supports), so fall back to a
+ * hidden textarea + execCommand. Returns whether the copy succeeded.
+ */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export const TOOL_ICON: Record<string, string> = {
   file: '📄',
   command: '❯_',

@@ -58,6 +58,12 @@ export interface RawUsage {
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
   cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number };
+  /**
+   * When the harness falls back to another model mid-turn, the top-level fields
+   * reflect ONLY the final iteration; per-model usage lives here. Present ⇒ price
+   * each iteration by its own model and ignore the (partial) top-level fields.
+   */
+  iterations?: Array<RawUsage & { model?: string }>;
 }
 
 export interface UsageDelta {
@@ -73,6 +79,27 @@ export interface UsageDelta {
 
 /** Compute a per-message usage + cost delta from a raw usage object and its model. */
 export function priceUsage(model: string | undefined | null, u: RawUsage): UsageDelta {
+  // Model-fallback turns: sum each iteration priced at its own model. The top-level
+  // fields describe only the last iteration, so we ignore them here.
+  if (Array.isArray(u.iterations) && u.iterations.length) {
+    return u.iterations
+      .map((it) => priceOne(it.model ?? model, it))
+      .reduce((a, d) => ({
+        inputTokens: a.inputTokens + d.inputTokens,
+        outputTokens: a.outputTokens + d.outputTokens,
+        cacheReadTokens: a.cacheReadTokens + d.cacheReadTokens,
+        cacheWrite5mTokens: a.cacheWrite5mTokens + d.cacheWrite5mTokens,
+        cacheWrite1hTokens: a.cacheWrite1hTokens + d.cacheWrite1hTokens,
+        costUsd: a.costUsd + d.costUsd,
+        priced: a.priced && d.priced, // fully priced only if every iteration was
+        estimated: a.estimated || d.estimated,
+      }));
+  }
+  return priceOne(model, u);
+}
+
+/** Price a single usage object (no iterations) against one model's rate. */
+function priceOne(model: string | undefined | null, u: RawUsage): UsageDelta {
   const input = u.input_tokens || 0;
   const output = u.output_tokens || 0;
   const cacheRead = u.cache_read_input_tokens || 0;

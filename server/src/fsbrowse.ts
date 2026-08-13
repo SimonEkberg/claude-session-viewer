@@ -1,6 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { SESSIONS_ROOT, AUTH_MODE, BROWSE_ROOTS } from './config.js';
+
+/** Confine browsing when the server is exposed beyond loopback (see BROWSE_ROOTS). */
+const CONFINED = AUTH_MODE !== 'off';
+
+function allowedRoots(home: string): string[] {
+  return [home, SESSIONS_ROOT, path.dirname(SESSIONS_ROOT), ...BROWSE_ROOTS].map((r) => path.resolve(r));
+}
+
+function within(target: string, roots: string[]): boolean {
+  const t = path.resolve(target);
+  return roots.some((r) => {
+    const rel = path.relative(r, t);
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  });
+}
 
 /**
  * Minimal server-side directory browser for the "New session" working-directory
@@ -35,6 +51,9 @@ export function listDir(input?: string): FsListing {
     dir = home; // fall back rather than error on a bad path
   }
 
+  // When exposed beyond loopback, deny anything outside the allowed roots.
+  if (CONFINED && !within(dir, allowedRoots(home))) dir = home;
+
   const entries: FsEntry[] = [];
   try {
     for (const name of fs.readdirSync(dir)) {
@@ -66,6 +85,8 @@ export function listDir(input?: string): FsListing {
 }
 
 function commonRoots(home: string): string[] {
+  // When confined, advertise only the allowed roots (no drive-letter shortcuts).
+  if (CONFINED) return allowedRoots(home).filter(safeIsDir);
   const roots = new Set<string>([home]);
   const desktop = path.join(home, 'Desktop');
   if (safeIsDir(desktop)) roots.add(desktop);

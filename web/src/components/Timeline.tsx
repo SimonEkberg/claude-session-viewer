@@ -37,6 +37,14 @@ export function Timeline({
     return m;
   }, [session]);
 
+  // tool_result events are always folded into their tool_call and never shown on
+  // their own, so exclude them from the "N / M events" denominator — otherwise the
+  // count implies filters are hiding rows that were never displayable.
+  const shownable = useMemo(
+    () => session.events.filter((e) => e.kind !== 'tool_result').length,
+    [session],
+  );
+
   const matchesFocus = (e: NormEvent): boolean => {
     if (!focus) return true;
     switch (focus.type) {
@@ -135,7 +143,7 @@ export function Timeline({
           </button>
         ))}
         <span className="filters-count">
-          {visible.length} / {session.events.length} events
+          {visible.length} / {shownable} events
         </span>
       </div>
 

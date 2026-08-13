@@ -1275,6 +1275,27 @@ body {
   font-size: 11.5px;
   border-radius: 6px;
 }
+.files-note {
+  color: var(--accent, #6ee7a8);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.files-cleanup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border, #2a2f3a);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.files-cleanup .muted {
+  font-size: 12.5px;
+  flex: 1;
+  min-width: 220px;
+}
 
 /* ---------- diff dialog ---------- */
 .diff-modal {

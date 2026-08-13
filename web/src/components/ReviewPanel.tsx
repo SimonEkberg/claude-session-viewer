@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { copyText } from '../util';
 
 /**
  * The "let another agent review the work" surface. Shows the Markdown export and
@@ -16,9 +17,10 @@ export function ReviewPanel({ id }: { id: string }) {
   }, [id]);
 
   const copy = async (text: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
+    if (await copyText(text)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    }
   };
 
   return (

@@ -52,12 +52,18 @@ export function loadFile(file: string): FullSession {
 }
 
 export function findFile(id: string): string | null {
-  // Fast path: derive from cache
+  const wanted = `${id}.jsonl`;
+  // Fast path: a previously-parsed file — but verify it still exists. If it was
+  // deleted or moved outside this tool, drop the stale cache entry and fall
+  // through, so callers get a clean null → 404 instead of a later ENOENT → 500.
   for (const file of cache.keys()) {
-    if (path.basename(file) === `${id}.jsonl`) return file;
+    if (path.basename(file) === wanted) {
+      if (fs.existsSync(file)) return file;
+      cache.delete(file);
+    }
   }
   for (const file of listTranscriptFiles()) {
-    if (path.basename(file) === `${id}.jsonl`) return file;
+    if (path.basename(file) === wanted) return file;
   }
   return null;
 }

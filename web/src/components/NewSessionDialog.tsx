@@ -23,6 +23,10 @@ export function NewSessionDialog({
   const [preview, setPreview] = useState<LaunchResult | null>(null);
   const [browsing, setBrowsing] = useState(false);
 
+  // The preview is a snapshot of one input set; invalidate it whenever an input
+  // changes so we never show a command that differs from what would actually run.
+  const clearPreview = () => setPreview(null);
+
   const submit = async () => {
     setError('');
     setBusy(true);
@@ -54,12 +58,22 @@ export function NewSessionDialog({
           rows={5}
           value={prompt}
           placeholder="e.g. Investigate the failing auth test and propose a fix"
-          onChange={(e) => setPrompt(e.target.value)}
+          onChange={(e) => {
+            setPrompt(e.target.value);
+            clearPreview();
+          }}
         />
 
         <label>Working directory</label>
         <div className="cwd-row">
-          <input value={cwd} onChange={(e) => setCwd(e.target.value)} className="mono" />
+          <input
+            value={cwd}
+            onChange={(e) => {
+              setCwd(e.target.value);
+              clearPreview();
+            }}
+            className="mono"
+          />
           <button className="btn" onClick={() => setBrowsing(true)}>
             Browse…
           </button>
@@ -68,7 +82,13 @@ export function NewSessionDialog({
         <div className="row2">
           <div>
             <label>Model</label>
-            <select value={model} onChange={(e) => setModel(e.target.value)}>
+            <select
+              value={model}
+              onChange={(e) => {
+                setModel(e.target.value);
+                clearPreview();
+              }}
+            >
               {MODELS.map((m) => (
                 <option key={m.v} value={m.v}>
                   {m.label}
@@ -78,7 +98,13 @@ export function NewSessionDialog({
           </div>
           <div>
             <label>Permission mode</label>
-            <select value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)}>
+            <select
+              value={permissionMode}
+              onChange={(e) => {
+                setPermissionMode(e.target.value);
+                clearPreview();
+              }}
+            >
               {PERMISSION_MODES.map((m) => (
                 <option key={m.v} value={m.v}>
                   {m.label}
@@ -89,7 +115,14 @@ export function NewSessionDialog({
         </div>
 
         <label className="checkline">
-          <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={dryRun}
+            onChange={(e) => {
+              setDryRun(e.target.checked);
+              clearPreview();
+            }}
+          />
           Dry run — just show the command, don't spawn
         </label>
 
@@ -118,6 +151,7 @@ export function NewSessionDialog({
           start={cwd}
           onPick={(p) => {
             setCwd(p);
+            clearPreview();
             setBrowsing(false);
           }}
           onClose={() => setBrowsing(false)}

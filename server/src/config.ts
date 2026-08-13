@@ -38,6 +38,16 @@ export const ALLOWED_LOGINS = (process.env.ALLOWED_LOGINS || '')
 export const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 
 /**
+ * Extra directories the New-Session cwd picker may browse. Only enforced when
+ * AUTH_MODE !== 'off' (i.e. the server is exposed beyond loopback): in that mode
+ * the browse endpoint is confined to home + the sessions root + these roots, so a
+ * remote caller can't enumerate the whole filesystem. Loopback-only stays
+ * unrestricted so the picker can reach any working directory on your own machine.
+ */
+export const BROWSE_ROOTS = (process.env.BROWSE_ROOTS || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
+/**
  * Claude Code encodes a session's working directory into its project folder name
  * by replacing every '/', '\' and ':' with '-'.  e.g.  C:\Users\simon -> C--Users-simon
  * We reproduce that so a launched session's transcript file is known up-front.

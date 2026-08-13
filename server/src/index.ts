@@ -7,8 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { PORT, HOST, CORS_ORIGINS, SESSIONS_ROOT, AUTH_MODE, ALLOWED_LOGINS } from './config.js';
 import { deleteSession, findFile, getSession, listProjects, listSessions, loadFile } from './index-store.js';
 import { buildReview, reviewToMarkdown } from './review.js';
-import { launchSession, resumeSession } from './launch.js';
+import { launchSession, resumeSession, expectedFilePath } from './launch.js';
 import { listDir } from './fsbrowse.js';
+import { revealInFileManager } from './reveal.js';
 import { usageWindows } from './usage.js';
 import { activityBus, isActive, activeIds } from './activity.js';
 
@@ -40,7 +41,9 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.get('/api/projects', (_req, res) => {
-  res.json({ sessionsRoot: SESSIONS_ROOT, projects: listProjects() });
+  // `reveal` tells the UI whether the "reveal in file manager" action is available
+  // (loopback only — see the /api/reveal route).
+  res.json({ sessionsRoot: SESSIONS_ROOT, projects: listProjects(), reveal: AUTH_MODE === 'off' });
 });
 
 app.get('/api/sessions', (req, res) => {
@@ -90,7 +93,10 @@ app.get('/api/sessions/:id/review.md', (req, res) => {
  */
 app.get('/api/sessions/:id/stream', (req, res) => {
   const id = req.params.id;
-  const file = findFile(id);
+  // A freshly launched session's transcript file may not exist yet (CLI startup
+  // takes ~1-3s). Fall back to its expected path and watch for the file to appear
+  // rather than 404ing, which the EventSource would treat as a permanent failure.
+  const file = findFile(id) || expectedFilePath(id);
   if (!file) return res.status(404).json({ error: 'session not found' });
 
   res.set({
@@ -102,10 +108,13 @@ app.get('/api/sessions/:id/stream', (req, res) => {
 
   const send = () => {
     try {
+      if (!fs.existsSync(file)) return; // not created yet (freshly launched)
       const session = loadFile(file);
       res.write(`event: session\ndata: ${JSON.stringify(session)}\n\n`);
     } catch (err) {
-      res.write(`event: error\ndata: ${JSON.stringify({ message: String(err) })}\n\n`);
+      // Named 'srv-error' so it doesn't collide with EventSource's built-in
+      // connection 'error' event on the client.
+      res.write(`event: srv-error\ndata: ${JSON.stringify({ message: String(err) })}\n\n`);
     }
   };
 
@@ -117,19 +126,39 @@ app.get('/api/sessions/:id/stream', (req, res) => {
   send();
   sendActivity();
 
+  // Coalesce bursty appends: parseSession re-reads the whole file synchronously, so
+  // firing on every change during an active turn would starve the event loop and
+  // every other SSE client. A trailing debounce bounds that to ~1 parse / interval.
+  let pending: ReturnType<typeof setTimeout> | null = null;
+  const scheduleSend = () => {
+    if (pending) return;
+    pending = setTimeout(() => {
+      pending = null;
+      send();
+    }, 150);
+  };
+
+  // ignoreInitial + watching a path that may not exist yet: 'add' fires when the CLI
+  // creates the transcript, 'change' on every append, 'unlink' if it's deleted.
   const watcher = chokidar.watch(file, { ignoreInitial: true });
-  watcher.on('change', send);
+  watcher.on('add', scheduleSend);
+  watcher.on('change', scheduleSend);
+  watcher.on('unlink', () => {
+    res.write(`event: deleted\ndata: {}\n\n`); // tell the client to leave live mode
+    res.end(); // triggers the req 'close' cleanup below
+  });
 
   const onActivity = (changedId: string) => {
     if (changedId !== id) return;
     sendActivity();
-    send(); // the turn just started/ended — refresh the snapshot too
+    scheduleSend(); // the turn just started/ended — refresh the snapshot too
   };
   activityBus.on('change', onActivity);
 
   const heartbeat = setInterval(() => res.write(': ping\n\n'), 15000);
 
   req.on('close', () => {
+    if (pending) clearTimeout(pending);
     clearInterval(heartbeat);
     watcher.close();
     activityBus.off('change', onActivity);
@@ -147,10 +176,16 @@ app.post('/api/sessions', (req, res) => {
 
 // Send a follow-up prompt into an existing session (resume). Runs in the session's cwd.
 app.post('/api/sessions/:id/prompt', (req, res) => {
-  const session = getSession(req.params.id);
+  const id = req.params.id;
+  // Validate the id (the launch.ts comment claims this) and refuse to resume while a
+  // turn is already running — two `claude --resume <id>` children appending the same
+  // transcript concurrently corrupt it. (Same guard the DELETE route uses.)
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) return res.status(400).json({ error: 'invalid session id' });
+  if (isActive(id)) return res.status(409).json({ error: 'a turn is already running for this session' });
+  const session = getSession(id);
   if (!session) return res.status(404).json({ error: 'session not found' });
   try {
-    const result = resumeSession(req.params.id, {
+    const result = resumeSession(id, {
       prompt: req.body?.prompt,
       cwd: req.body?.cwd || session.cwd || process.cwd(),
       model: req.body?.model,
@@ -167,6 +202,22 @@ app.post('/api/sessions/:id/prompt', (req, res) => {
 app.get('/api/fs', (req, res) => {
   const p = typeof req.query.path === 'string' ? req.query.path : undefined;
   res.json(listDir(p));
+});
+
+// Reveal a file in the OS file manager. Loopback only: it spawns a process on the
+// HOST, which is meaningless (and an unnecessary surface) once exposed via tailscale.
+app.post('/api/reveal', (req, res) => {
+  if (AUTH_MODE !== 'off') {
+    return res.status(403).json({ error: 'reveal is available only for local (loopback) access' });
+  }
+  const p = typeof req.body?.path === 'string' ? req.body.path : '';
+  try {
+    revealInFileManager(p);
+    res.json({ ok: true });
+  } catch (err) {
+    const code = (err as { code?: number })?.code;
+    res.status(code === 400 ? 400 : 500).json({ error: String(err instanceof Error ? err.message : err) });
+  }
 });
 
 // Rolling-window usage across all sessions (local estimate, not the official meter).
@@ -194,6 +245,10 @@ app.get('/api/activity/stream', (req, res) => {
   });
 });
 
+// Unmatched /api paths return JSON (not the SPA's HTML, and not Express's default
+// HTML 404), so API clients always get a JSON body.
+app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
+
 // Serve the built web app so ONE server (this one) hosts both the UI and the API
 // on a single origin — the right shape for `tailscale serve` / a persistent deploy.
 // (In dev you still use Vite on :5273; this only kicks in after `npm run build`.)
@@ -206,6 +261,14 @@ if (fs.existsSync(WEB_DIST)) {
   });
   console.log(`  serving web UI from: ${WEB_DIST}`);
 }
+
+// Final error handler: bad JSON / oversized bodies (express.json throws
+// SyntaxError / PayloadTooLargeError) surface as JSON with the right status, not
+// Express's default HTML error page.
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = err?.status || err?.statusCode || 500;
+  res.status(status).json({ error: String(err?.message || err) });
+});
 
 app.listen(PORT, HOST, () => {
   console.log(`claude-session-viewer server on http://${HOST}:${PORT}`);
