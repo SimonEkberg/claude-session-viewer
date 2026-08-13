@@ -38,6 +38,13 @@ export const ALLOWED_LOGINS = (process.env.ALLOWED_LOGINS || '')
 export const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 
 /**
+ * Where the viewer keeps its own data: per-session peer allowlists (session
+ * collaboration) and the generated per-session MCP config files. Kept out of the
+ * repo and out of the transcript store.
+ */
+export const DATA_DIR = process.env.CSV_DATA_DIR || path.join(os.homedir(), '.claude-session-viewer');
+
+/**
  * Extra directories the New-Session cwd picker may browse. Only enforced when
  * AUTH_MODE !== 'off' (i.e. the server is exposed beyond loopback): in that mode
  * the browse endpoint is confined to home + the sessions root + these roots, so a

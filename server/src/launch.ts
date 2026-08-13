@@ -3,8 +3,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { CLAUDE_BIN, SESSIONS_ROOT, projectSlug } from './config.js';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { CLAUDE_BIN, SESSIONS_ROOT, DATA_DIR, projectSlug } from './config.js';
 import { markActive, markInactive } from './activity.js';
+import { getPeers, setPeers } from './peers.js';
 
 function isDir(p: string): boolean {
   try {
@@ -12,6 +14,40 @@ function isDir(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+// ── Session collaboration: attach the read-only `peers` MCP server ──────────────
+// When a session has an allowlist, we give its launched CLI a `peers` MCP server
+// (list_peers / read_peer) and auto-approve those tools with --allowedTools. The
+// server runs the same way this server does (node + the tsx loader, absolute paths
+// so it's cwd-independent) and gets the caller's id via env.
+const HERE = path.dirname(fileURLToPath(import.meta.url)); // server/src
+const REPO_ROOT = path.resolve(HERE, '../..');
+const TSX_PREFLIGHT = path.join(REPO_ROOT, 'node_modules', 'tsx', 'dist', 'preflight.cjs');
+const TSX_LOADER = path.join(REPO_ROOT, 'node_modules', 'tsx', 'dist', 'loader.mjs');
+const MCP_SCRIPT = path.join(HERE, 'mcp-peers.ts');
+
+function mcpConfigPath(id: string): string {
+  return path.join(DATA_DIR, 'mcp', `${id}.json`);
+}
+
+function writeMcpConfig(id: string): void {
+  const cfg = {
+    mcpServers: {
+      peers: {
+        command: process.execPath, // absolute node — the CLI can exec it from any cwd
+        args: ['--require', TSX_PREFLIGHT, '--import', pathToFileURL(TSX_LOADER).href, MCP_SCRIPT],
+        env: { CSV_CALLER_ID: id, CSV_DATA_DIR: DATA_DIR, SESSIONS_ROOT },
+      },
+    },
+  };
+  fs.mkdirSync(path.dirname(mcpConfigPath(id)), { recursive: true });
+  fs.writeFileSync(mcpConfigPath(id), JSON.stringify(cfg, null, 2));
+}
+
+/** CLI flags that attach the peers server + auto-allow its tools (empty if no peers). */
+function collabFlags(id: string): string[] {
+  return ['--mcp-config', mcpConfigPath(id), '--allowedTools', 'mcp__peers__*'];
 }
 
 /**
@@ -70,6 +106,7 @@ export interface LaunchRequest {
   cwd?: string;
   model?: string;
   permissionMode?: string; // default | plan | acceptEdits | bypassPermissions
+  peers?: string[]; // session ids this new session may read (read-only collaboration)
   dryRun?: boolean;
 }
 
@@ -110,12 +147,21 @@ export function launchSession(req: LaunchRequest): LaunchResult {
   if (req.model) args.push('--model', req.model);
   if (req.permissionMode) args.push('--permission-mode', req.permissionMode);
 
+  const peers = req.peers ? [...new Set(req.peers.filter((p) => p && p !== id))] : [];
+  if (peers.length) args.push(...collabFlags(id)); // preview shows the flags too
+
   // CLAUDE_BIN is quoted too: a real install path with spaces (C:\Program Files\…\
   // claude.cmd) would otherwise split into a wrong argv and the launch would fail.
   const command = `${quoteArg(CLAUDE_BIN)} ${args.map(quoteArg).join(' ')}`;
 
   if (req.dryRun) {
     return { id, cwd, projectDir, filePath, command, spawned: false };
+  }
+
+  // Persist the allowlist + write the per-session MCP config only on a real launch.
+  if (peers.length) {
+    setPeers(id, peers);
+    writeMcpConfig(id);
   }
 
   // shell:true so the Windows `claude.cmd` shim resolves; the (safe) flag args are
@@ -158,8 +204,15 @@ export function resumeSession(id: string, req: ResumeRequest): ResumeResult {
   if (req.model) args.push('--model', req.model);
   if (req.permissionMode) args.push('--permission-mode', req.permissionMode);
 
+  // Re-attach the peers MCP server if this session has an allowlist (so collaboration
+  // works on follow-ups too, and picks up allowlist edits made since launch).
+  const hasPeers = getPeers(id).length > 0;
+  if (hasPeers) args.push(...collabFlags(id));
+
   const command = `${quoteArg(CLAUDE_BIN)} ${args.map(quoteArg).join(' ')}`;
   if (req.dryRun) return { id, command, spawned: false };
+
+  if (hasPeers) writeMcpConfig(id);
 
   const child = spawn(command, { cwd: req.cwd, shell: true, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   feedPrompt(child, req.prompt);
