@@ -66,13 +66,14 @@ Key modules: `server/src/transcript.ts` (parser), `pricing.ts` / `context.ts` / 
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
-| `HOST` | `127.0.0.1` | Interface to bind. Loopback by default so the RCE-capable endpoints aren't reachable from the network. For remote access, set to your Tailscale IP (never `0.0.0.0`). |
+| `HOST` | `127.0.0.1` | Interface to bind. **Keep it loopback.** For remote access, leave it loopback and put `tailscale serve` in front (it injects the identity header the gate needs) — don't bind the tailnet IP directly, and never `0.0.0.0`. |
 | `PORT` | `3737` | Server port. |
 | `SESSIONS_ROOT` | `~/.claude/projects` | Where transcripts live. Point it anywhere. |
 | `CLAUDE_BIN` | `claude` | Path to the Claude Code CLI used to launch/resume. |
 | `CORS_ORIGINS` | `http://localhost:5273,http://127.0.0.1:5273` | Comma-separated browser origins allowed to call the API. |
 | `AUTH_MODE` | `off` | `tailscale` requires a `Tailscale-User-Login` header (injected by `tailscale serve`, unforgeable) in `ALLOWED_LOGINS`. Gates every request. Fails closed. |
 | `ALLOWED_LOGINS` | — | Comma-separated Tailscale logins allowed when `AUTH_MODE=tailscale` (e.g. `you@example.com`). |
+| `ALLOW_INSECURE_EXPOSURE` | — | Set to `1` to bypass the startup guard that refuses to boot when the RCE endpoints would be exposed without the gate. Not recommended. |
 | `AUTO_COMPACT_PCT` | `0.92` | Estimated fraction of the context window at which Claude Code auto-compacts (the real trigger isn't stored locally). |
 | `CONTEXT_WINDOW_OVERRIDES` | — | JSON map of model→window tokens for unknown models. |
 | `PRICING_OVERRIDES` | — | JSON map of model→`{input,output}` $/Mtok to override built-in rates. |
@@ -81,7 +82,25 @@ Key modules: `server/src/transcript.ts` (parser), `pricing.ts` / `context.ts` / 
 
 The **New session / resume** endpoints spawn a `claude` agent on the host: with `acceptEdits`/`bypassPermissions` that **writes files and runs commands** — effectively remote code execution as your user. `/api/fs` reads arbitrary directories. **Do not port-forward or bind this to a public interface.**
 
-By default the server binds **loopback only** (`127.0.0.1`), so it's reachable only from the machine itself. To use it from your phone, put the laptop and phone on a private network (**Tailscale**) and set `HOST` to the tailnet IP — never `0.0.0.0`, never a router port-forward. A hardened remote-access design (Tailscale + a passkey/OIDC login + per-action confirmation + a low-privilege agent account) is the recommended path before any remote use; see `docs/` if present, or ask.
+By default the server binds **loopback only** (`127.0.0.1`), so it's reachable only from the machine itself. To use it from your phone, put the laptop and phone on a private network (**Tailscale**) and keep the server on loopback with `tailscale serve` in front — never `0.0.0.0`, never a router port-forward, never `tailscale funnel`. A hardened remote-access design (Tailscale + a passkey/OIDC login + per-action confirmation + a low-privilege agent account) is the recommended path before any shared-tailnet use; see `docs/` if present, or ask.
+
+### The one rule (and the guard that enforces it)
+
+> **The server may be reachable beyond loopback *only* when `AUTH_MODE=tailscale` is on.**
+
+- **Local use** → leave `AUTH_MODE` off and keep `HOST=127.0.0.1`. Loopback isn't reachable from other devices, so no gate is needed. (`npm run dev` / `npm start`.)
+- **Remote use** → set `AUTH_MODE=tailscale` + `ALLOWED_LOGINS=<your login>`, keep `HOST=127.0.0.1`, and run `tailscale serve` in front. Tailscale injects an unforgeable `Tailscale-User-Login` header; the app admits only logins in `ALLOWED_LOGINS` and **fails closed** if the list is empty.
+
+The server **enforces this at startup and refuses to boot** on an ungated exposure:
+
+| Situation | Result |
+| --- | --- |
+| `AUTH_MODE=off` **and** `HOST` is non-loopback | ✖ exits with an error |
+| `AUTH_MODE=off` **and** `tailscale serve` is proxying your port | ✖ exits with an error (detected via `tailscale serve status`) |
+| `AUTH_MODE=off` on loopback, not exposed | ✔ boots, prints "no identity gate — local only" |
+| `AUTH_MODE=tailscale` | ✔ boots (every request is gated) |
+
+So a bare `npm start` can no longer silently leave the RCE endpoints open on your tailnet — it stops and tells you to add the gate. To override the check (not recommended), set `ALLOW_INSECURE_EXPOSURE=1`.
 
 ## Phone access over Tailscale (remote mode)
 

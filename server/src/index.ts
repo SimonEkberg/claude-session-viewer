@@ -10,6 +10,7 @@ import { buildReview, reviewToMarkdown } from './review.js';
 import { launchSession, resumeSession, expectedFilePath } from './launch.js';
 import { listDir } from './fsbrowse.js';
 import { revealInFileManager } from './reveal.js';
+import { assertSafeExposure } from './startup.js';
 import { usageWindows } from './usage.js';
 import { activityBus, isActive, activeIds } from './activity.js';
 
@@ -270,8 +271,14 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   res.status(status).json({ error: String(err?.message || err) });
 });
 
+// Fail closed before binding if the RCE endpoints would be exposed without the gate.
+assertSafeExposure();
+
 app.listen(PORT, HOST, () => {
   console.log(`claude-session-viewer server on http://${HOST}:${PORT}`);
-  console.log(`  bound to: ${HOST}${HOST === '127.0.0.1' ? ' (loopback only — set HOST to the tailnet IP for remote access)' : ''}`);
+  console.log(`  bound to: ${HOST}${HOST === '127.0.0.1' ? ' (loopback only)' : ''}`);
+  console.log(
+    `  auth: ${AUTH_MODE === 'tailscale' ? `tailscale identity gate (${ALLOWED_LOGINS.length} login(s) allowed)` : 'off — local loopback only'}`,
+  );
   console.log(`  sessions root: ${SESSIONS_ROOT}`);
 });
