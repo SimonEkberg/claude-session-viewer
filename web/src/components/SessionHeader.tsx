@@ -90,6 +90,7 @@ export function SessionHeader({
       </div>
 
       <div className="sh-meta">
+        <CopyIdChip id={session.id} />
         {session.cwd && <span className="mono" title={session.cwd}>📁 {session.cwd}</span>}
         {session.gitBranch && <span className="mono">⑂ {session.gitBranch}</span>}
         {session.model && <span className="pill">{session.model}</span>}
@@ -275,6 +276,25 @@ function UsageWindows() {
 }
 
 type OpFilter = 'all' | 'write' | 'edit' | 'read';
+
+/** Session id shown short, with a one-click copy of the FULL id (for MCP wiring). */
+function CopyIdChip({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  const doCopy = async () => {
+    if (await copyText(id)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    }
+  };
+  return (
+    <span className="sess-id mono" title={id}>
+      <span className="sess-id-k">id</span> {id.slice(0, 8)}…
+      <button className="copy-id" title="Copy full session id" onClick={doCopy}>
+        {copied ? '✓' : '⧉'}
+      </button>
+    </span>
+  );
+}
 
 export function FilesPanel({ session, canReveal }: { session: FullSession; canReveal?: boolean }) {
   const [op, setOp] = useState<OpFilter>('all');

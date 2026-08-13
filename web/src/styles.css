@@ -1297,6 +1297,46 @@ body {
   min-width: 220px;
 }
 
+/* clickable filename + preview button on Write/Edit rows in the decision map */
+.target.clickable {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.target.clickable:hover {
+  color: var(--accent, #6ee7a8);
+}
+.preview-btn {
+  margin-left: 8px;
+}
+
+/* copyable session id in the header meta row */
+.sess-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.sess-id-k {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.copy-id {
+  background: none;
+  border: 1px solid var(--border, #2a2f3a);
+  color: inherit;
+  border-radius: 5px;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.copy-id:hover {
+  border-color: var(--accent, #6ee7a8);
+  color: var(--accent, #6ee7a8);
+}
+
 /* ---------- diff dialog ---------- */
 .diff-modal {
   width: min(960px, 96vw);

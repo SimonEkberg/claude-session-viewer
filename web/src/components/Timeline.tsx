@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Focus, FullSession, NormEvent } from '../types';
 import { clock, fileName, bytes, TOOL_ICON } from '../util';
+import { DiffDialog } from './DiffDialog';
 
 type Filters = {
   reasoning: boolean;
@@ -28,6 +29,7 @@ export function Timeline({
   onClearFocus: () => void;
 }) {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [diffPath, setDiffPath] = useState<string | null>(null); // Write/Edit preview
 
   // Pair each tool_result to its originating tool_call so we render action→result as one unit.
   const resultFor = useMemo(() => {
@@ -149,7 +151,12 @@ export function Timeline({
 
       <div className="rail">
         {visible.map((e) => (
-          <Row key={e.seq} e={e} result={e.toolUseId ? resultFor.get(e.toolUseId) : undefined} />
+          <Row
+            key={e.seq}
+            e={e}
+            result={e.toolUseId ? resultFor.get(e.toolUseId) : undefined}
+            onPreview={setDiffPath}
+          />
         ))}
         <div ref={endRef} className="rail-end" />
       </div>
@@ -166,11 +173,13 @@ export function Timeline({
           ↓ latest
         </button>
       )}
+
+      {diffPath && <DiffDialog session={session} path={diffPath} onClose={() => setDiffPath(null)} />}
     </div>
   );
 }
 
-function Row({ e, result }: { e: NormEvent; result?: NormEvent }) {
+function Row({ e, result, onPreview }: { e: NormEvent; result?: NormEvent; onPreview?: (path: string) => void }) {
   if (e.kind === 'user_prompt') {
     return (
       <Node dotClass={e.injected ? 'dot-system' : 'dot-prompt'} sidechain={e.isSidechain} ts={e.ts}>
@@ -216,6 +225,9 @@ function Row({ e, result }: { e: NormEvent; result?: NormEvent }) {
   // tool_call (+ folded result)
   const ok = result?.ok;
   const status = ok === undefined ? 'pending' : ok ? 'ok' : 'error';
+  // Write/Edit inputs carry the content, so we can reconstruct + preview the file
+  // (same diff view the Files tab uses) straight from the decision map.
+  const canPreview = (e.tool === 'Write' || e.tool === 'Edit') && e.targetKind === 'file' && !!e.target && !!onPreview;
   return (
     <Node dotClass={`dot-tool ${status}`} spinning={status === 'pending'} sidechain={e.isSidechain} ts={e.ts}>
       <div className={`card card-tool ${status}`}>
@@ -223,7 +235,11 @@ function Row({ e, result }: { e: NormEvent; result?: NormEvent }) {
           <span className="glyph">{TOOL_ICON[e.targetKind || 'other'] || '🔧'}</span>
           <span className="tool-name">{e.tool}</span>
           {e.targetKind === 'file' ? (
-            <span className="target" title={e.target}>
+            <span
+              className={`target ${canPreview ? 'clickable' : ''}`}
+              title={canPreview ? `Preview ${e.target}` : e.target}
+              onClick={canPreview ? () => onPreview!(e.target!) : undefined}
+            >
               {fileName(e.target)}
             </span>
           ) : (
@@ -243,6 +259,11 @@ function Row({ e, result }: { e: NormEvent; result?: NormEvent }) {
             )}
             {result?.bytes ? ` ${bytes(result.bytes)}` : ''}
           </span>
+          {canPreview && (
+            <button className="btn tiny preview-btn" title="Preview file changes" onClick={() => onPreview!(e.target!)}>
+              ⇄ preview
+            </button>
+          )}
         </div>
         {result?.preview ? <Collapsible text={result.preview} lines={3} mono /> : null}
       </div>
