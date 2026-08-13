@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type { Focus, FullSession, UsageWindow } from '../types';
-import { fileName, usd, tokens } from '../util';
+import { fileName, usd, tokens, copyText } from '../util';
 import { DiffDialog } from './DiffDialog';
 import type { SessionUsage } from '../types';
 
@@ -276,16 +276,28 @@ function UsageWindows() {
 
 type OpFilter = 'all' | 'write' | 'edit' | 'read';
 
-export function FilesPanel({ session }: { session: FullSession }) {
+export function FilesPanel({ session, canReveal }: { session: FullSession; canReveal?: boolean }) {
   const [op, setOp] = useState<OpFilter>('all');
   const [sort, setSort] = useState<'count' | 'name'>('count');
   const [diffPath, setDiffPath] = useState<string | null>(null);
+  const [note, setNote] = useState(''); // transient feedback (copied / reveal error)
+
+  const flash = (msg: string) => {
+    setNote(msg);
+    window.setTimeout(() => setNote(''), 1600);
+  };
 
   const counts = useMemo(() => {
     const c = { write: 0, edit: 0, read: 0 };
     for (const f of session.filesTouched) for (const o of f.ops) if (o in c) (c as any)[o]++;
     return c;
   }, [session]);
+
+  // Files this session actually changed on disk (write/edit) — the cleanup set.
+  const changedPaths = useMemo(
+    () => session.filesTouched.filter((f) => f.ops.includes('write') || f.ops.includes('edit')).map((f) => f.path),
+    [session],
+  );
 
   const files = useMemo(() => {
     let fs = session.filesTouched.filter((f) => op === 'all' || f.ops.includes(op));
@@ -294,6 +306,21 @@ export function FilesPanel({ session }: { session: FullSession }) {
   }, [session, op, sort]);
 
   if (!session.filesTouched.length) return <div className="muted pad">No files read or written.</div>;
+
+  const copyOne = async (p: string) => flash((await copyText(p)) ? 'Copied path' : 'Copy failed');
+  const copyChanged = async () =>
+    flash(
+      (await copyText(changedPaths.join('\n')))
+        ? `Copied ${changedPaths.length} path${changedPaths.length === 1 ? '' : 's'}`
+        : 'Copy failed',
+    );
+  const reveal = async (p: string) => {
+    try {
+      await api.reveal(p);
+    } catch (e) {
+      flash(String(e instanceof Error ? e.message : e));
+    }
+  };
 
   return (
     <div className="files-panel">
@@ -312,7 +339,20 @@ export function FilesPanel({ session }: { session: FullSession }) {
             name
           </button>
         </span>
+        {note && <span className="files-note">{note}</span>}
       </div>
+
+      {changedPaths.length > 0 && (
+        <div className="files-cleanup">
+          <span className="muted">
+            {changedPaths.length} file{changedPaths.length === 1 ? '' : 's'} changed on disk — deleting this session removes only its
+            transcript, not these. Copy the paths to review or revert them in git yourself.
+          </span>
+          <button className="btn tiny" onClick={copyChanged}>
+            ⧉ copy changed paths
+          </button>
+        </div>
+      )}
 
       {files.map((f) => {
         const changed = f.ops.includes('write') || f.ops.includes('edit');
@@ -331,6 +371,14 @@ export function FilesPanel({ session }: { session: FullSession }) {
             </div>
             <div className="file-actions">
               <span className="file-count">×{f.count}</span>
+              <button className="btn tiny" title="Copy full path" onClick={() => copyOne(f.path)}>
+                ⧉
+              </button>
+              {canReveal && (
+                <button className="btn tiny" title="Reveal in file manager (local only)" onClick={() => reveal(f.path)}>
+                  📂
+                </button>
+              )}
               {changed && (
                 <button className="btn tiny" onClick={() => setDiffPath(f.path)}>
                   ⇄ changes

@@ -13,13 +13,25 @@ const LS_MODE = 'csv.permissionMode';
  *    mode is where file-write permission is granted (before the prompt runs).
  * Last-used model/mode persist in localStorage.
  */
-export function FollowUpBar({ session, onSent }: { session: FullSession; onSent: () => void }) {
+export function FollowUpBar({
+  session,
+  onSent,
+  active,
+}: {
+  session: FullSession;
+  onSent: () => void;
+  active?: boolean; // a turn is already running for this session
+}) {
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState(() => localStorage.getItem(LS_MODEL) ?? '');
   const [mode, setMode] = useState(() => localStorage.getItem(LS_MODE) ?? 'default');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const taRef = useRef<HTMLTextAreaElement>(null);
+  // Block sending while a turn is in flight: two `claude --resume` processes
+  // appending the same transcript concurrently corrupt it (the server also rejects
+  // this with 409, but disabling here makes it obvious instead of an error).
+  const blocked = busy || !!active;
 
   useEffect(() => localStorage.setItem(LS_MODEL, model), [model]);
   useEffect(() => localStorage.setItem(LS_MODE, mode), [mode]);
@@ -36,7 +48,7 @@ export function FollowUpBar({ session, onSent }: { session: FullSession; onSent:
   const canWrite = PERMISSION_MODES.find((m) => m.v === mode)?.writes;
 
   const send = async () => {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || blocked) return;
     setError('');
     setBusy(true);
     try {
@@ -87,19 +99,26 @@ export function FollowUpBar({ session, onSent }: { session: FullSession; onSent:
           ref={taRef}
           className="followup-input"
           rows={1}
-          placeholder="Send a follow-up prompt…  (Enter to send · Shift+Enter for newline)"
+          placeholder={
+            active
+              ? 'A turn is running… wait for it to finish'
+              : 'Send a follow-up prompt…  (Enter to send · Shift+Enter for newline)'
+          }
           value={prompt}
-          disabled={busy}
+          disabled={blocked}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => {
+            // Don't send on the Enter that COMMITS an IME composition (dead keys,
+            // CJK candidates) — that Enter isn't "submit", it's "accept character".
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               send();
             }
           }}
         />
-        <button className="btn primary send" disabled={busy || !prompt.trim()} onClick={send}>
-          {busy ? 'Sending…' : 'Send ↵'}
+        <button className="btn primary send" disabled={blocked || !prompt.trim()} onClick={send}>
+          {busy ? 'Sending…' : active ? 'Running…' : 'Send ↵'}
         </button>
       </div>
     </div>

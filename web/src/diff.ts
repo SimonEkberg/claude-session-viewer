@@ -82,7 +82,16 @@ export function fileChanges(events: NormEvent[], target: string): FileChange[] {
       if (p === target)
         changes.push({ kind: 'edit', ts: e.ts, seq: e.seq, isNewFile: false, before: oldS, after: newS });
       if (before !== undefined) {
-        const updated = inp.replace_all ? before.split(oldS).join(newS) : before.replace(oldS, newS);
+        // NOT before.replace(oldS, newS): String.replace interprets $-patterns in
+        // the replacement ($&, $$, $') even with a string search, which would
+        // corrupt any new_string containing them. Splice the exact text instead.
+        let updated: string;
+        if (inp.replace_all) {
+          updated = before.split(oldS).join(newS);
+        } else {
+          const i = before.indexOf(oldS);
+          updated = i < 0 ? before : before.slice(0, i) + newS + before.slice(i + oldS.length);
+        }
         current.set(p, updated);
       }
     }

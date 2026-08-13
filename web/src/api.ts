@@ -10,12 +10,35 @@ import type {
 
 async function j<T>(url: string): Promise<T> {
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  if (!r.ok) throw new Error(await errText(r));
   return r.json() as Promise<T>;
 }
 
+/**
+ * Extract a human error from a failed Response. Reads the body as text first so a
+ * non-JSON error (a 413 "PayloadTooLargeError", a proxy's 502 HTML) doesn't turn
+ * into a misleading "Unexpected token" JSON.parse error.
+ */
+async function errText(r: Response): Promise<string> {
+  const t = await r.text().catch(() => '');
+  try {
+    return JSON.parse(t).error || t || r.statusText;
+  } catch {
+    return t || `${r.status} ${r.statusText}`;
+  }
+}
+
 export const api = {
-  projects: () => j<{ sessionsRoot: string; projects: ProjectInfo[] }>('/api/projects'),
+  projects: () => j<{ sessionsRoot: string; projects: ProjectInfo[]; reveal: boolean }>('/api/projects'),
+  /** Open a file in the OS file manager on the host (loopback-only; 403 otherwise). */
+  reveal: async (path: string): Promise<void> => {
+    const r = await fetch('/api/reveal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    if (!r.ok) throw new Error(await errText(r));
+  },
   sessions: (project?: string) =>
     j<{ sessions: SessionSummary[] }>(`/api/sessions${project ? `?project=${encodeURIComponent(project)}` : ''}`),
   session: (id: string) => j<FullSession>(`/api/sessions/${id}`),
@@ -37,15 +60,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || r.statusText);
-    return data as LaunchResult;
+    if (!r.ok) throw new Error(await errText(r));
+    return (await r.json()) as LaunchResult;
   },
   deleteSession: async (id: string): Promise<{ ok: true; deleted: string[] }> => {
     const r = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || r.statusText);
-    return data;
+    if (!r.ok) throw new Error(await errText(r));
+    return r.json();
   },
   fs: (path?: string) => j<FsListing>(`/api/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   usageWindows: () => j<UsageWindowsResponse>('/api/usage/windows'),
@@ -70,9 +91,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || r.statusText);
-    return data as ResumeResult;
+    if (!r.ok) throw new Error(await errText(r));
+    return (await r.json()) as ResumeResult;
   },
   /** Subscribe to live session updates via SSE. Returns an unsubscribe fn. */
   stream(
@@ -96,7 +116,21 @@ export const api = {
         /* ignore */
       }
     });
-    es.addEventListener('error', () => onError?.('stream error'));
+    // Server-side data error (named to avoid colliding with the built-in 'error').
+    es.addEventListener('srv-error', (ev) => {
+      try {
+        onError?.(JSON.parse((ev as MessageEvent).data).message || 'server error');
+      } catch {
+        onError?.('server error');
+      }
+    });
+    // The session's transcript was deleted out from under this stream.
+    es.addEventListener('deleted', () => onError?.('deleted'));
+    // Built-in connection error: transient blips auto-reconnect (readyState
+    // CONNECTING); only a permanent CLOSED (e.g. the endpoint now 404s) is terminal.
+    es.addEventListener('error', () => {
+      if (es.readyState === EventSource.CLOSED) onError?.('closed');
+    });
     return () => es.close();
   },
 };

@@ -1,7 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { FullSession } from '../types';
-import { fileChanges, lineDiff, type DiffLine } from '../diff';
+import { fileChanges, lineDiff } from '../diff';
 import { fileName, clock } from '../util';
+
+// Cap how many diff lines we render per change. A generated file (a big
+// package-lock.json, say) can produce tens of thousands of lines; mounting them all
+// freezes the tab (and OOMs the mobile layout). Show the rest behind a button.
+const LINE_CAP = 800;
 
 /**
  * Git-style change viewer for a single file: every Write/Edit to it in this session,
@@ -17,7 +22,11 @@ export function DiffDialog({
   path: string;
   onClose: () => void;
 }) {
-  const changes = useMemo(() => fileChanges(session.events, path), [session, path]);
+  // Key on the event count, not the session object: during live streaming a new
+  // session snapshot arrives every tick with a fresh array, but the recorded
+  // changes only differ when an event is actually appended.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const changes = useMemo(() => fileChanges(session.events, path), [session.events.length, path]);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -41,7 +50,8 @@ export function DiffDialog({
               kind={c.kind}
               ts={c.ts}
               isNewFile={c.isNewFile}
-              lines={lineDiff(c.before, c.after)}
+              before={c.before}
+              after={c.after}
             />
           ))}
         </div>
@@ -55,16 +65,23 @@ function ChangeCard({
   kind,
   ts,
   isNewFile,
-  lines,
+  before,
+  after,
 }: {
   index: number;
   kind: 'write' | 'edit';
   ts: string | null;
   isNewFile: boolean;
-  lines: DiffLine[];
+  before: string;
+  after: string;
 }) {
+  // Compute the (potentially expensive O(n·m)) diff once per content pair, not on
+  // every live re-render of the dialog while streaming.
+  const lines = useMemo(() => lineDiff(before, after), [before, after]);
+  const [showAll, setShowAll] = useState(false);
   const adds = lines.filter((l) => l.type === 'add').length;
   const dels = lines.filter((l) => l.type === 'del').length;
+  const shown = showAll ? lines : lines.slice(0, LINE_CAP);
   return (
     <div className="change-card">
       <div className="change-head">
@@ -79,13 +96,18 @@ function ChangeCard({
         <span className="change-ts mono">{clock(ts)}</span>
       </div>
       <div className="diff-lines">
-        {lines.map((l, i) => (
+        {shown.map((l, i) => (
           <div key={i} className={`dl dl-${l.type}`}>
             <span className="gutter-sign">{l.type === 'add' ? '+' : l.type === 'del' ? '−' : ' '}</span>
             <span className="dl-text">{l.text || ' '}</span>
           </div>
         ))}
       </div>
+      {lines.length > LINE_CAP && !showAll && (
+        <button className="more" onClick={() => setShowAll(true)}>
+          ▼ show all {lines.length.toLocaleString()} lines
+        </button>
+      )}
     </div>
   );
 }

@@ -69,6 +69,9 @@ export function usageWindows(nowMs: number): { computedAt: string; windows: Usag
     } catch {
       continue;
     }
+    // One API message spans several JSONL lines that repeat the same usage — count
+    // each message.id once per file (mirrors the transcript parser).
+    const seenUsageIds = new Set<string>();
     for (const line of raw.split(/\r?\n/)) {
       if (!line.trim()) continue;
       let o: any;
@@ -78,13 +81,22 @@ export function usageWindows(nowMs: number): { computedAt: string; windows: Usag
         continue;
       }
       if (o.type !== 'assistant' || !o.message?.usage || !o.timestamp) continue;
+      // Synthetic/API-error lines carry all-zero usage on model "<synthetic>".
+      if (o.message.model === '<synthetic>' || o.isApiErrorMessage) continue;
+      const mid: string | undefined = o.message.id;
+      if (mid) {
+        if (seenUsageIds.has(mid)) continue;
+        seenUsageIds.add(mid);
+      }
       const t = Date.parse(o.timestamp);
       if (isNaN(t)) continue;
       const ageH = (nowMs - t) / 3_600_000;
       const d = priceUsage(o.message.model, o.message.usage as RawUsage);
       const toks = d.inputTokens + d.outputTokens + d.cacheReadTokens + d.cacheWrite5mTokens + d.cacheWrite1hTokens;
       for (const w of acc) {
-        if (ageH <= w.hours) {
+        // Require the event inside the window on BOTH ends — a future-dated line
+        // (clock skew) has negative age and would otherwise land in every window.
+        if (ageH >= 0 && ageH <= w.hours) {
           w.costUsd += d.costUsd;
           w.totalTokens += toks;
           w.sessionSet.add(id);

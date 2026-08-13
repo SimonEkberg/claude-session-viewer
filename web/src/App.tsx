@@ -14,6 +14,7 @@ export function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [sessionsRoot, setSessionsRoot] = useState('');
+  const [canReveal, setCanReveal] = useState(false); // "reveal in file manager" available (loopback only)
   const [loading, setLoading] = useState(true);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -31,6 +32,9 @@ export function App() {
 
   const unsubRef = useRef<(() => void) | null>(null);
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The id of the most recent openSession() request, so a slow response for a
+  // previously-selected session can't overwrite the one the user just clicked.
+  const openReqRef = useRef<string | null>(null);
 
   // Called on every live snapshot: refresh the session and flash "working" for a
   // few seconds. Combined with tailPending below, this reads as "actively working"
@@ -52,7 +56,13 @@ export function App() {
       if (e.kind === 'tool_result' && e.forToolUseId) results.add(e.forToolUseId);
       if (e.kind === 'tool_call') lastCall = e;
     }
-    return !!lastCall?.toolUseId && !results.has(lastCall.toolUseId);
+    if (!lastCall?.toolUseId || results.has(lastCall.toolUseId)) return false;
+    // Age-gate: a dangling tool_call from a session that died mid-tool (window
+    // closed, crash — no result ever written) would otherwise spin "working…"
+    // forever. Only treat it as in-flight if it's recent.
+    const ts = lastCall.ts ? Date.parse(lastCall.ts) : NaN;
+    if (!isNaN(ts) && Date.now() - ts > 5 * 60_000) return false;
+    return true;
   }, [session]);
 
   // `serverActive` is authoritative for turns launched/resumed through this tool
@@ -61,10 +71,11 @@ export function App() {
   const working = live && (serverActive || pulse || tailPending);
 
   const refreshList = useCallback(async () => {
-    const [{ sessions }, { projects, sessionsRoot }] = await Promise.all([api.sessions(), api.projects()]);
+    const [{ sessions }, { projects, sessionsRoot, reveal }] = await Promise.all([api.sessions(), api.projects()]);
     setSessions(sessions);
     setProjects(projects);
     setSessionsRoot(sessionsRoot);
+    setCanReveal(reveal);
     setLoading(false);
   }, []);
 
@@ -90,12 +101,28 @@ export function App() {
     setServerActive(false);
   }, []);
 
+  // Terminal stream conditions (deleted transcript, permanently closed connection):
+  // leave live mode so the UI doesn't claim "Live" over stale data forever.
+  const onStreamEnd = useCallback(
+    (reason: string) => {
+      stopLive();
+      setLive(false);
+      if (reason === 'deleted') {
+        setSelectedId(null);
+        setSession(null);
+        setMobilePane('list');
+        refreshList();
+      }
+    },
+    [stopLive, refreshList],
+  );
+
   const goLive = useCallback(
     (id: string) => {
       setLive(true);
-      unsubRef.current = api.stream(id, onSessionUpdate, setServerActive, () => {});
+      unsubRef.current = api.stream(id, onSessionUpdate, setServerActive, onStreamEnd);
     },
-    [onSessionUpdate],
+    [onSessionUpdate, onStreamEnd],
   );
 
   const openSession = useCallback(
@@ -107,10 +134,12 @@ export function App() {
       setSelectedId(id);
       setMobilePane('detail');
       setSession(null);
+      openReqRef.current = id;
       try {
-        setSession(await api.session(id));
+        const s = await api.session(id);
+        if (openReqRef.current === id) setSession(s); // ignore a stale, slower response
       } catch {
-        setSession(null);
+        if (openReqRef.current === id) setSession(null);
       }
     },
     [stopLive],
@@ -207,10 +236,10 @@ export function App() {
               {tab === 'timeline' && (
                 <Timeline session={session} focus={focus} onClearFocus={() => setFocus(null)} />
               )}
-              {tab === 'files' && <FilesPanel session={session} />}
+              {tab === 'files' && <FilesPanel session={session} canReveal={canReveal} />}
               {tab === 'review' && <ReviewPanel id={session.id} />}
             </div>
-            <FollowUpBar session={session} onSent={onFollowUp} />
+            <FollowUpBar session={session} onSent={onFollowUp} active={live && serverActive} />
           </>
         )}
       </main>
