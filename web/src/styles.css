@@ -1337,6 +1337,84 @@ body {
   color: var(--accent, #6ee7a8);
 }
 
+/* collaboration: ⚙ button + peer picker */
+.peers-btn {
+  background: none;
+  border: 1px solid var(--border, #2a2f3a);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 1px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.peers-btn:hover {
+  border-color: var(--accent, #6ee7a8);
+  color: var(--accent, #6ee7a8);
+}
+.peer-picker {
+  border: 1px solid var(--border, #2a2f3a);
+  border-radius: 8px;
+  padding: 8px;
+  margin: 6px 0 4px;
+}
+.peer-picker-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.peer-picker-top .search {
+  flex: 1;
+  margin: 0;
+}
+.peer-list {
+  max-height: 220px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.peer-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.peer-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.peer-row.on {
+  background: rgba(110, 231, 168, 0.08);
+}
+.peer-row input {
+  margin-top: 3px;
+}
+.peer-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.peer-title {
+  font-size: 13px;
+}
+.peer-sub {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.collab-hint {
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+.collab-hint.warn {
+  color: #f5a623;
+}
+
 /* ---------- diff dialog ---------- */
 .diff-modal {
   width: min(960px, 96vw);

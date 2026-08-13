@@ -139,6 +139,20 @@ export interface UsageWindowsResponse {
   windows: UsageWindow[];
 }
 
+/** A session that can be added to another session's read-only peer allowlist. */
+export interface PeerCandidate {
+  id: string;
+  title: string;
+  cwd: string | null;
+  projectDir: string;
+  updatedAt: string | null;
+}
+
+export interface PeersResponse {
+  peers: string[];
+  candidates: PeerCandidate[];
+}
+
 /** What a clicked stat/badge focuses the timeline on. */
 export type Focus =
   | { type: 'kind'; kind: EventKind; label: string }
