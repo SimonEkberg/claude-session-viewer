@@ -2,6 +2,7 @@ import type {
   FsListing,
   FullSession,
   LaunchResult,
+  PeersResponse,
   ProjectInfo,
   ResumeResult,
   SessionSummary,
@@ -48,11 +49,23 @@ export const api = {
     if (!r.ok) throw new Error(`${r.status}`);
     return r.text();
   },
+  /** Session collaboration allowlist: current peers + candidate sessions to pick from. */
+  peers: (id: string) => j<PeersResponse>(`/api/sessions/${id}/peers`),
+  setPeers: async (id: string, peers: string[]): Promise<{ peers: string[] }> => {
+    const r = await fetch(`/api/sessions/${id}/peers`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peers }),
+    });
+    if (!r.ok) throw new Error(await errText(r));
+    return r.json();
+  },
   launch: async (body: {
     prompt: string;
     cwd?: string;
     model?: string;
     permissionMode?: string;
+    peers?: string[];
     dryRun?: boolean;
   }): Promise<LaunchResult> => {
     const r = await fetch('/api/sessions', {

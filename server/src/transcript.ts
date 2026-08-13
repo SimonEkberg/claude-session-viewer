@@ -136,6 +136,15 @@ function firstLine(s: unknown, max = 200): string {
 
 /** Reduce a tool_use input to a one-line human summary + a kind for iconography. */
 function summarizeTool(name: string, input: any): { target?: string; targetKind?: string } {
+  // MCP tools are named mcp__<server>__<tool> — surface them readably (e.g. the
+  // session-collaboration peers server: "peers · read_peer (<id>)").
+  if (name.startsWith('mcp__')) {
+    const parts = name.split('__');
+    const server = parts[1] || '?';
+    const tool = parts.slice(2).join('__') || '?';
+    const arg = input && typeof input === 'object' ? input.session_id || input.query || input.path || '' : '';
+    return { target: `${server} · ${tool}${arg ? ` (${arg})` : ''}`, targetKind: 'agent' };
+  }
   if (!input || typeof input !== 'object') return { targetKind: 'meta' };
   switch (name) {
     case 'Read':

@@ -8,6 +8,7 @@ import { PORT, HOST, CORS_ORIGINS, SESSIONS_ROOT, AUTH_MODE, ALLOWED_LOGINS } fr
 import { deleteSession, findFile, getSession, listProjects, listSessions, loadFile } from './index-store.js';
 import { buildReview, reviewToMarkdown } from './review.js';
 import { launchSession, resumeSession, expectedFilePath } from './launch.js';
+import { getPeers, setPeers } from './peers.js';
 import { listDir } from './fsbrowse.js';
 import { revealInFileManager } from './reveal.js';
 import { assertSafeExposure } from './startup.js';
@@ -197,6 +198,25 @@ app.post('/api/sessions/:id/prompt', (req, res) => {
   } catch (err) {
     res.status(400).json({ error: String(err instanceof Error ? err.message : err) });
   }
+});
+
+// Session collaboration allowlist (read-only peek). GET returns the current peers +
+// the candidate sessions to choose from; PUT replaces the allowlist (takes effect on
+// the session's next turn, since the MCP server is attached at launch/resume).
+app.get('/api/sessions/:id/peers', (req, res) => {
+  const id = req.params.id;
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) return res.status(400).json({ error: 'invalid session id' });
+  const candidates = listSessions()
+    .filter((s) => s.id !== id)
+    .map((s) => ({ id: s.id, title: s.title, cwd: s.cwd, projectDir: s.projectDir, updatedAt: s.updatedAt }));
+  res.json({ peers: getPeers(id), candidates });
+});
+
+app.put('/api/sessions/:id/peers', (req, res) => {
+  const id = req.params.id;
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) return res.status(400).json({ error: 'invalid session id' });
+  if (!Array.isArray(req.body?.peers)) return res.status(400).json({ error: 'peers must be an array of session ids' });
+  res.json({ peers: setPeers(id, req.body.peers.map(String)) });
 });
 
 // Directory browser for the New Session working-directory picker.

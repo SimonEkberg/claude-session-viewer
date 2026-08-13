@@ -3,6 +3,7 @@ import { api } from '../api';
 import type { Focus, FullSession, UsageWindow } from '../types';
 import { fileName, usd, tokens, copyText } from '../util';
 import { DiffDialog } from './DiffDialog';
+import { EditSessionDialog } from './EditSessionDialog';
 import type { SessionUsage } from '../types';
 
 // "$X+" when some models have no known price (lower bound); "≈$X" when priced via
@@ -48,6 +49,7 @@ export function SessionHeader({
   const c = session.counts;
   const u = session.usage;
   const [showUsage, setShowUsage] = useState(false);
+  const [showPeers, setShowPeers] = useState(false);
   const topTools = Object.entries(c.byTool).sort((a, b) => b[1] - a[1]);
 
   // A stat is "active" when the timeline is currently focused on it (and we're on the timeline tab).
@@ -90,6 +92,10 @@ export function SessionHeader({
       </div>
 
       <div className="sh-meta">
+        <CopyIdChip id={session.id} />
+        <button className="peers-btn" title="Choose which sessions this one can read (collaboration)" onClick={() => setShowPeers(true)}>
+          ⚙ collaboration
+        </button>
         {session.cwd && <span className="mono" title={session.cwd}>📁 {session.cwd}</span>}
         {session.gitBranch && <span className="mono">⑂ {session.gitBranch}</span>}
         {session.model && <span className="pill">{session.model}</span>}
@@ -99,6 +105,7 @@ export function SessionHeader({
             🔒 reasoning redacted ({c.reasoningRedacted})
           </span>
         )}
+        {showPeers && <EditSessionDialog sessionId={session.id} onClose={() => setShowPeers(false)} />}
       </div>
 
       <div className="stat-row">
@@ -275,6 +282,25 @@ function UsageWindows() {
 }
 
 type OpFilter = 'all' | 'write' | 'edit' | 'read';
+
+/** Session id shown short, with a one-click copy of the FULL id (for MCP wiring). */
+function CopyIdChip({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  const doCopy = async () => {
+    if (await copyText(id)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    }
+  };
+  return (
+    <span className="sess-id mono" title={id}>
+      <span className="sess-id-k">id</span> {id.slice(0, 8)}…
+      <button className="copy-id" title="Copy full session id" onClick={doCopy}>
+        {copied ? '✓' : '⧉'}
+      </button>
+    </span>
+  );
+}
 
 export function FilesPanel({ session, canReveal }: { session: FullSession; canReveal?: boolean }) {
   const [op, setOp] = useState<OpFilter>('all');

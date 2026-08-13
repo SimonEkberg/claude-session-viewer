@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
-import type { LaunchResult } from '../types';
+import type { LaunchResult, PeerCandidate } from '../types';
 import { DirectoryBrowser } from './DirectoryBrowser';
+import { PeerPicker } from './PeerPicker';
 import { MODELS, PERMISSION_MODES } from '../constants';
 
 export function NewSessionDialog({
@@ -22,6 +23,21 @@ export function NewSessionDialog({
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<LaunchResult | null>(null);
   const [browsing, setBrowsing] = useState(false);
+  const [collab, setCollab] = useState(false);
+  const [candidates, setCandidates] = useState<PeerCandidate[]>([]);
+  const [peers, setPeers] = useState<string[]>([]);
+
+  // Candidate sessions this new one could read (read-only collaboration).
+  useEffect(() => {
+    api
+      .sessions()
+      .then((r) =>
+        setCandidates(
+          r.sessions.map((s) => ({ id: s.id, title: s.title, cwd: s.cwd, projectDir: s.projectDir, updatedAt: s.updatedAt })),
+        ),
+      )
+      .catch(() => setCandidates([]));
+  }, []);
 
   // The preview is a snapshot of one input set; invalidate it whenever an input
   // changes so we never show a command that differs from what would actually run.
@@ -31,7 +47,14 @@ export function NewSessionDialog({
     setError('');
     setBusy(true);
     try {
-      const res = await api.launch({ prompt, cwd, model: model || undefined, permissionMode, dryRun });
+      const res = await api.launch({
+        prompt,
+        cwd,
+        model: model || undefined,
+        permissionMode,
+        peers: collab && peers.length ? peers : undefined,
+        dryRun,
+      });
       if (dryRun) {
         setPreview(res);
       } else {
@@ -113,6 +136,35 @@ export function NewSessionDialog({
             </select>
           </div>
         </div>
+
+        <label className="checkline">
+          <input
+            type="checkbox"
+            checked={collab}
+            onChange={(e) => {
+              setCollab(e.target.checked);
+              clearPreview();
+            }}
+          />
+          Collaboration — let this session <b>read</b> other sessions (read-only)
+        </label>
+        {collab && (
+          <>
+            <PeerPicker
+              candidates={candidates}
+              selected={peers}
+              onChange={(ids) => {
+                setPeers(ids);
+                clearPreview();
+              }}
+            />
+            <p className={`collab-hint ${permissionMode === 'plan' ? 'warn' : 'muted'}`}>
+              {permissionMode === 'plan'
+                ? '⚠ Plan mode blocks MCP tools — choose "Default" (or higher) above so peer reading works.'
+                : 'Peer reading adds MCP tools a capable model loads on demand; small models may not use them reliably.'}
+            </p>
+          </>
+        )}
 
         <label className="checkline">
           <input
