@@ -41,12 +41,14 @@ Nothing is hardcoded to a specific user or path — `SESSIONS_ROOT`, `CLAUDE_BIN
 ## What you get
 
 - **Sidebar** — every session on the machine, searchable, running sessions float to top with a live ⟳ spinner and a "N running" count. Delete a session from its card (🗑 → confirm).
-- **Decision map** — prompt → 💭 reasoning → 🔧 tool call (file/command/url) → ✓/✗ result → 💬 conclusion. Clickable stats/tool-badges focus the timeline; auto-scrolls to the latest row; per-tool spinner while a call is in flight.
+- **Decision map** — prompt → 💭 reasoning → 🔧 tool call (file/command/url) → ✓/✗ result → 💬 conclusion. Clickable stats/tool-badges focus the timeline; auto-scrolls to the latest row; per-tool spinner while a call is in flight. Click a Write/Edit's filename (or **⇄ preview**) to see that file's changes inline.
 - **Files tab** — every file read/edited/written, filter by action, and a **git-style diff** for each Write/Edit.
 - **Cost + context** — per-session token cost (priced per model, cache-aware; unknown models estimated by tier), rolling 5h/24h/7d usage, and a **context-window meter** showing how close the session is to auto-compaction.
 - **Live "working" indicator** — driven by the CLI process lifetime, so it stays lit through the thinking phase and clears only when the turn truly ends.
 - **New session / follow-up** — start or resume a session (model + permission-mode picker, directory browser), then **live-tail** it. The prompt is piped via stdin, so multi-line pastes and shell characters are safe.
 - **Review export** — a de-noised Markdown trace at `/api/sessions/:id/review.md` for a human or another agent to review.
+- **Session collaboration (read-only)** — let a session **read** other sessions you allowlist, via MCP tools the viewer hosts (`list_peers` / `read_peer`). One-way and allowlist-enforced; configure it in the New Session dialog or the ⚙ on any open session. See [Session collaboration](#session-collaboration-read-only).
+- **Roomier view** — collapse the sidebar (◀) and the header details (**▴ details**) to give the decision map the full screen; both persist. On phones/tablets the master-detail layout already gives the conversation the full screen.
 
 ## How it works
 
@@ -60,7 +62,16 @@ claude CLI ──writes──▶  ~/.claude/projects/<slug>/<id>.jsonl
      web (React + Vite)  decision map / files / cost / review
 ```
 
-Key modules: `server/src/transcript.ts` (parser), `pricing.ts` / `context.ts` / `usage.ts` (cost + context), `launch.ts` (spawn/resume via stdin), `activity.ts` (process-lifetime "working" signal), `web/src/diff.ts` (line diff).
+Key modules: `server/src/transcript.ts` (parser), `pricing.ts` / `context.ts` / `usage.ts` (cost + context), `launch.ts` (spawn/resume via stdin), `activity.ts` (process-lifetime "working" signal), `peers.ts` + `mcp-peers.ts` (session collaboration), `web/src/diff.ts` (line diff).
+
+## Session collaboration (read-only)
+
+Let one session **read** another's work — handy when a reviewer session needs to see what a builder session did, or when you want sessions to share context.
+
+- The viewer hosts a small **stdio MCP server** (`server/src/mcp-peers.ts`) and attaches it to a launched/resumed session **only when that session has a peer allowlist**. The session then has two tools: `list_peers` (the sessions it may read) and `read_peer(session_id)` (that peer's de-noised review Markdown). Reading is **one-way** and never spawns the peer.
+- **Enforcement is server-side** against a per-session allowlist (`peers.json` in `CSV_DATA_DIR`): a session can only read ids you allowed, regardless of what the model asks for. Tools are attached via `--mcp-config` and auto-approved with `--allowedTools "mcp__peers__*"`.
+- **Set it up** in the New Session dialog ("Collaboration") or via the ⚙ on any open session's header — edits take effect on that session's next turn. The header also shows a copyable **session id** (⧉) for reference/wiring.
+- **Two constraints (Claude Code behavior):** the reading session must run in a **non-plan** permission mode (plan mode blocks *all* MCP tools) and on a **capable model** (small models may not reliably use the deferred tools). The dialogs warn about this.
 
 ## Configuration
 
@@ -70,6 +81,7 @@ Key modules: `server/src/transcript.ts` (parser), `pricing.ts` / `context.ts` / 
 | `PORT` | `3737` | Server port. |
 | `SESSIONS_ROOT` | `~/.claude/projects` | Where transcripts live. Point it anywhere. |
 | `CLAUDE_BIN` | `claude` | Path to the Claude Code CLI used to launch/resume. |
+| `CSV_DATA_DIR` | `~/.claude-session-viewer` | Where the viewer stores its own data: session-collaboration allowlists (`peers.json`) and the generated per-session MCP configs. |
 | `CORS_ORIGINS` | `http://localhost:5273,http://127.0.0.1:5273` | Comma-separated browser origins allowed to call the API. |
 | `AUTH_MODE` | `off` | `tailscale` requires a `Tailscale-User-Login` header (injected by `tailscale serve`, unforgeable) in `ALLOWED_LOGINS`. Gates every request. Fails closed. |
 | `ALLOWED_LOGINS` | — | Comma-separated Tailscale logins allowed when `AUTH_MODE=tailscale` (e.g. `you@example.com`). |
