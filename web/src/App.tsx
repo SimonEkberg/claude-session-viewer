@@ -16,6 +16,17 @@ export function App() {
   const [sessionsRoot, setSessionsRoot] = useState('');
   const [canReveal, setCanReveal] = useState(false); // "reveal in file manager" available (loopback only)
   const [loading, setLoading] = useState(true);
+  // Collapse the left session list (desktop) to give the conversation more width.
+  // On mobile the master-detail layout already hides it, so this only affects desktop.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('csv.sbCollapsed') === '1');
+  const toggleSidebar = useCallback(
+    () =>
+      setSidebarCollapsed((v) => {
+        localStorage.setItem('csv.sbCollapsed', v ? '0' : '1');
+        return !v;
+      }),
+    [],
+  );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // On phones/tablets we show either the list or the detail, not both. Desktop
@@ -195,7 +206,7 @@ export function App() {
   const defaultCwd = session?.cwd || projects[0]?.cwdGuess || '';
 
   return (
-    <div className={`app mobile-${mobilePane}`}>
+    <div className={`app mobile-${mobilePane} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <Sidebar
         sessions={sessions}
         projects={projects}
@@ -204,8 +215,14 @@ export function App() {
         onSelect={openSession}
         onNew={() => setShowNew(true)}
         onDelete={onDelete}
+        onToggleCollapse={toggleSidebar}
         loading={loading}
       />
+      {sidebarCollapsed && (
+        <button className="sidebar-expand" onClick={toggleSidebar} title="Show sessions">
+          ☰
+        </button>
+      )}
 
       <main className="main">
         {!session && (

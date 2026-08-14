@@ -10,6 +10,7 @@ export function Sidebar({
   onSelect,
   onNew,
   onDelete,
+  onToggleCollapse,
   loading,
 }: {
   sessions: SessionSummary[];
@@ -19,6 +20,7 @@ export function Sidebar({
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
+  onToggleCollapse?: () => void;
   loading: boolean;
 }) {
   const [q, setQ] = useState('');
@@ -48,8 +50,15 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-top">
-        <div className="brand">
-          <span className="logo">◈</span> Session Viewer
+        <div className="brand-row">
+          <div className="brand">
+            <span className="logo">◈</span> Session Viewer
+          </div>
+          {onToggleCollapse && (
+            <button className="sidebar-collapse-btn" onClick={onToggleCollapse} title="Collapse the sidebar">
+              ◀
+            </button>
+          )}
         </div>
         <button className="btn primary" onClick={onNew}>
           + New session
