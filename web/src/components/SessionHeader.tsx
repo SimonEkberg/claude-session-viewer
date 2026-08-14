@@ -50,6 +50,14 @@ export function SessionHeader({
   const u = session.usage;
   const [showUsage, setShowUsage] = useState(false);
   const [showPeers, setShowPeers] = useState(false);
+  // Collapse the detail rows (meta / stats / context / tool badges) to give the
+  // decision map a bigger viewport. Persisted so it stays how you left it.
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('csv.hdrCollapsed') === '1');
+  const toggleCollapsed = () =>
+    setCollapsed((v) => {
+      localStorage.setItem('csv.hdrCollapsed', v ? '0' : '1');
+      return !v;
+    });
   const topTools = Object.entries(c.byTool).sort((a, b) => b[1] - a[1]);
 
   // A stat is "active" when the timeline is currently focused on it (and we're on the timeline tab).
@@ -88,9 +96,18 @@ export function SessionHeader({
           <button className={`live-toggle ${live ? 'on' : ''}`} onClick={onToggleLive}>
             <span className="live-dot" /> {live ? 'Live' : 'Go live'}
           </button>
+          <button
+            className="hdr-collapse"
+            onClick={toggleCollapsed}
+            title={collapsed ? 'Show session details' : 'Hide session details for a bigger view'}
+          >
+            {collapsed ? '▾ details' : '▴ details'}
+          </button>
         </div>
       </div>
 
+      {!collapsed && (
+        <>
       <div className="sh-meta">
         <CopyIdChip id={session.id} />
         <button className="peers-btn" title="Choose which sessions this one can read (collaboration)" onClick={() => setShowPeers(true)}>
@@ -137,6 +154,8 @@ export function SessionHeader({
           </button>
         ))}
       </div>
+        </>
+      )}
 
       <nav className="tabs">
         {(['timeline', 'files', 'review'] as const).map((t) => (

@@ -38,6 +38,69 @@ body {
   overflow: hidden;
 }
 
+/* Sidebar collapse (desktop only — on mobile the master-detail layout below handles
+   showing one pane at a time). Collapsing gives the conversation the full width. */
+@media (min-width: 821px) {
+  .app.sidebar-collapsed {
+    grid-template-columns: 0 1fr;
+  }
+  .app.sidebar-collapsed .sidebar {
+    display: none;
+  }
+}
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sidebar-collapse-btn {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.sidebar-collapse-btn:hover {
+  color: var(--fg, #e6e6e6);
+  border-color: var(--muted);
+}
+/* Floating "show sessions" button, visible only while the sidebar is collapsed. */
+.sidebar-expand {
+  position: fixed;
+  top: 10px;
+  left: 8px;
+  z-index: 60;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  color: var(--fg, #e6e6e6);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 15px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.sidebar-expand:hover {
+  border-color: var(--accent, #6ee7a8);
+}
+/* Header details collapse toggle */
+.hdr-collapse {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.hdr-collapse:hover {
+  color: var(--fg, #e6e6e6);
+  border-color: var(--muted);
+}
+
 /* ---------- Sidebar ---------- */
 .sidebar {
   background: var(--bg-1);
@@ -1553,6 +1616,12 @@ body {
   }
   .mobile-back {
     display: inline-flex;
+  }
+  /* Sidebar collapse is a desktop concept; on mobile the ‹ Sessions back button and
+     the master-detail layout already switch panes. Hide the collapse affordances. */
+  .sidebar-collapse-btn,
+  .sidebar-expand {
+    display: none;
   }
 
   /* Sidebar: bigger tap targets; delete visible (no hover on touch) */
