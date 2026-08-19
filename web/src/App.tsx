@@ -4,6 +4,7 @@ import type { Focus, FullSession, ProjectInfo, SessionSummary } from './types';
 import { Sidebar } from './components/Sidebar';
 import { SessionHeader, FilesPanel } from './components/SessionHeader';
 import { Timeline } from './components/Timeline';
+import { WorkingLocation } from './components/WorkingLocation';
 import { ReviewPanel } from './components/ReviewPanel';
 import { NewSessionDialog } from './components/NewSessionDialog';
 import { FollowUpBar } from './components/FollowUpBar';
@@ -40,12 +41,22 @@ export function App() {
   const [pulse, setPulse] = useState(false); // brief "just got an update" flag
   const [serverActive, setServerActive] = useState(false); // a claude process is running for this session
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set()); // all running sessions (machine-wide)
+  // Sessions that went running → idle since you last looked at them: a "finished,
+  // ready to continue" cue in the sidebar. Cleared when you open the session.
+  const [idleReady, setIdleReady] = useState<Set<string>>(new Set());
 
   const unsubRef = useRef<(() => void) | null>(null);
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The id of the most recent openSession() request, so a slow response for a
   // previously-selected session can't overwrite the one the user just clicked.
   const openReqRef = useRef<string | null>(null);
+  // Read inside the activity-stream callback without making the subscription
+  // depend on (and tear down / re-open on) every selection or activity change.
+  const prevActiveRef = useRef<Set<string>>(new Set());
+  const selectedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   // Called on every live snapshot: refresh the session and flash "working" for a
   // few seconds. Combined with tailPending below, this reads as "actively working"
@@ -99,7 +110,21 @@ export function App() {
   // sessions we're not actively viewing.
   useEffect(() => {
     return api.activityStream((ids) => {
-      setActiveIds(new Set(ids));
+      const next = new Set(ids);
+      const prev = prevActiveRef.current;
+      // A session that dropped out of the running set just finished a turn → flag
+      // it "ready" (unless you're already watching it). Anything currently running
+      // is by definition not idle, so clear any stale flag for it.
+      setIdleReady((cur) => {
+        const merged = new Set(cur);
+        next.forEach((id) => merged.delete(id));
+        prev.forEach((id) => {
+          if (!next.has(id) && id !== selectedIdRef.current) merged.add(id);
+        });
+        return merged;
+      });
+      prevActiveRef.current = next;
+      setActiveIds(next);
       refreshList();
     });
   }, [refreshList]);
@@ -143,6 +168,14 @@ export function App() {
       setFocus(null);
       setTab('timeline');
       setSelectedId(id);
+      selectedIdRef.current = id;
+      // Opening a session acknowledges its "ready to continue" cue.
+      setIdleReady((cur) => {
+        if (!cur.has(id)) return cur;
+        const n = new Set(cur);
+        n.delete(id);
+        return n;
+      });
       setMobilePane('detail');
       setSession(null);
       openReqRef.current = id;
@@ -198,6 +231,12 @@ export function App() {
         setSession(null);
         setMobilePane('list');
       }
+      setIdleReady((cur) => {
+        if (!cur.has(id)) return cur;
+        const n = new Set(cur);
+        n.delete(id);
+        return n;
+      });
       await refreshList();
     },
     [selectedId, stopLive, refreshList],
@@ -212,6 +251,7 @@ export function App() {
         projects={projects}
         selectedId={selectedId}
         activeIds={activeIds}
+        idleReady={idleReady}
         onSelect={openSession}
         onNew={() => setShowNew(true)}
         onDelete={onDelete}
@@ -249,6 +289,7 @@ export function App() {
               focus={focus}
               onInspect={setFocus}
             />
+            {tab === 'timeline' && working && <WorkingLocation session={session} />}
             <div className="content-area">
               {tab === 'timeline' && (
                 <Timeline session={session} focus={focus} onClearFocus={() => setFocus(null)} />
