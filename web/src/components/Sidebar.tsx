@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectInfo, SessionSummary } from '../types';
 import { timeAgo } from '../util';
 
@@ -7,6 +7,7 @@ export function Sidebar({
   projects,
   selectedId,
   activeIds,
+  idleReady,
   onSelect,
   onNew,
   onDelete,
@@ -17,6 +18,7 @@ export function Sidebar({
   projects: ProjectInfo[];
   selectedId: string | null;
   activeIds: Set<string>;
+  idleReady: Set<string>;
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
@@ -26,6 +28,8 @@ export function Sidebar({
   const [q, setQ] = useState('');
   const [project, setProject] = useState<string>('');
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [showRunning, setShowRunning] = useState(false);
+  const runningRef = useRef<HTMLDivElement>(null);
 
   const filtered = useMemo(() => {
     const needle = q.toLowerCase();
@@ -37,15 +41,34 @@ export function Sidebar({
           s.id.includes(needle) ||
           (s.cwd || '').toLowerCase().includes(needle)),
     );
-    // Running sessions float to the top so you can watch several at once.
+    // Running sessions float to the top so you can watch several at once; just-idle
+    // "ready to continue" sessions sit right below them so you can see where to pick up.
     return [...list].sort((a, b) => {
-      const ra = activeIds.has(a.id) ? 1 : 0;
-      const rb = activeIds.has(b.id) ? 1 : 0;
+      const ra = activeIds.has(a.id) ? 2 : idleReady.has(a.id) ? 1 : 0;
+      const rb = activeIds.has(b.id) ? 2 : idleReady.has(b.id) ? 1 : 0;
       return ra !== rb ? rb - ra : b.mtimeMs - a.mtimeMs;
     });
-  }, [sessions, q, project, activeIds]);
+  }, [sessions, q, project, activeIds, idleReady]);
 
-  const runningCount = sessions.filter((s) => activeIds.has(s.id)).length;
+  // All running sessions (ignores the search/project filter) for the dropdown below.
+  const runningSessions = useMemo(
+    () => sessions.filter((s) => activeIds.has(s.id)).sort((a, b) => b.mtimeMs - a.mtimeMs),
+    [sessions, activeIds],
+  );
+  const runningCount = runningSessions.length;
+
+  // Close the running dropdown on outside-click, and whenever nothing is running.
+  useEffect(() => {
+    if (runningCount === 0) setShowRunning(false);
+  }, [runningCount]);
+  useEffect(() => {
+    if (!showRunning) return;
+    const onDoc = (e: MouseEvent) => {
+      if (runningRef.current && !runningRef.current.contains(e.target as Node)) setShowRunning(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [showRunning]);
 
   return (
     <aside className="sidebar">
@@ -64,8 +87,33 @@ export function Sidebar({
           + New session
         </button>
         {runningCount > 0 && (
-          <div className="running-count">
-            <span className="spinner" /> {runningCount} running
+          <div className="running-wrap" ref={runningRef}>
+            <button
+              className="running-count"
+              onClick={() => setShowRunning((v) => !v)}
+              title="Show running sessions"
+            >
+              <span className="spinner" /> {runningCount} running <span className="running-caret">▾</span>
+            </button>
+            {showRunning && (
+              <div className="running-dropdown" role="menu">
+                {runningSessions.map((s) => (
+                  <button
+                    key={s.id}
+                    className="running-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowRunning(false);
+                      onSelect(s.id);
+                    }}
+                  >
+                    <span className="spinner si-spin" />
+                    <span className="running-item-title">{s.title}</span>
+                    <span className="running-item-meta">{timeAgo(s.updatedAt)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -91,15 +139,19 @@ export function Sidebar({
         {!loading && filtered.length === 0 && <div className="muted pad">No sessions.</div>}
         {filtered.map((s) => {
           const running = activeIds.has(s.id);
+          const ready = !running && idleReady.has(s.id);
           const pending = confirmId === s.id;
           return (
             <div
               key={s.id}
-              className={`session-item ${s.id === selectedId ? 'active' : ''} ${running ? 'running' : ''}`}
+              className={`session-item ${s.id === selectedId ? 'active' : ''} ${running ? 'running' : ''} ${
+                ready ? 'ready' : ''
+              }`}
             >
               <div className="si-main" role="button" tabIndex={0} onClick={() => onSelect(s.id)}>
                 <div className="si-title">
                   {running && <span className="spinner si-spin" />}
+                  {ready && <span className="ready-dot" title="Finished — ready to continue" />}
                   {s.title}
                 </div>
                 <div className="si-meta">
