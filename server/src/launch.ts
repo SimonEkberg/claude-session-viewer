@@ -64,16 +64,58 @@ export function expectedFilePath(id: string): string | undefined {
  * Wire a spawned child's lifetime to the session's active state, and quiet the
  * very high-frequency `thinking_tokens` stdout events (kept for other output).
  */
+export interface PromptImage {
+  media_type: string; // image/png | image/jpeg | image/gif | image/webp
+  data: string; // base64, no "data:" prefix
+}
+
+const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const MAX_IMAGES = 10;
+const MAX_IMAGE_B64 = 7_400_000; // ~5.5 MB decoded — Claude's per-image ceiling, with headroom
+
 /**
- * Feed the prompt to the CLI over stdin instead of as a command-line argument, so
+ * Validate attached images before they reach the CLI. The data never touches the
+ * shell command line (it's written to stdin), so this guards resource use / bad
+ * input, not injection: allowed type, sane count, sane per-image size.
+ */
+function validateImages(images: unknown): PromptImage[] {
+  if (images == null) return [];
+  if (!Array.isArray(images)) throw new Error('images must be an array');
+  if (images.length > MAX_IMAGES) throw new Error(`too many images (max ${MAX_IMAGES})`);
+  return images.map((img, i) => {
+    const mt = (img as any)?.media_type;
+    const data = (img as any)?.data;
+    if (!ALLOWED_IMAGE_TYPES.has(mt)) throw new Error(`image ${i}: unsupported type ${mt}`);
+    if (typeof data !== 'string' || !data) throw new Error(`image ${i}: missing base64 data`);
+    if (data.length > MAX_IMAGE_B64) throw new Error(`image ${i}: too large (max ~5 MB)`);
+    return { media_type: mt, data };
+  });
+}
+
+/**
+ * Feed the turn's input to the CLI over stdin (never as a command-line argument), so
  * newlines and shell metacharacters (#, &, |, %, <, >, quotes, backticks…) pass
  * through verbatim — no shell quoting, nothing for cmd.exe to mis-split.
+ *
+ * With no images this is the plain-text path (default --input-format=text). With
+ * images we switch to a single stream-json user message whose content is the text
+ * plus one image block each — the native multimodal input the CLI accepts under
+ * --input-format=stream-json (verified against claude 2.1.220).
  */
-function feedPrompt(child: ChildProcess, prompt: string): void {
+function feedInput(child: ChildProcess, prompt: string, images: PromptImage[]): void {
   const stdin = child.stdin;
   if (!stdin) return;
   stdin.on('error', () => {}); // swallow EPIPE if the child exits before we finish writing
-  stdin.write(prompt);
+  if (images.length) {
+    const content: unknown[] = [];
+    if (prompt && prompt.trim()) content.push({ type: 'text', text: prompt });
+    for (const img of images) {
+      content.push({ type: 'image', source: { type: 'base64', media_type: img.media_type, data: img.data } });
+    }
+    stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n');
+  } else {
+    stdin.write(prompt);
+  }
   stdin.end();
 }
 
@@ -105,8 +147,10 @@ export interface LaunchRequest {
   prompt: string;
   cwd?: string;
   model?: string;
+  effort?: string; // low | medium | high | xhigh | max (CLI --effort)
   permissionMode?: string; // default | plan | acceptEdits | bypassPermissions
   peers?: string[]; // session ids this new session may read (read-only collaboration)
+  images?: PromptImage[]; // pasted/attached screenshots, sent as image content blocks
   dryRun?: boolean;
 }
 
@@ -130,8 +174,9 @@ export interface LaunchResult {
  * historical sessions on one identical code path.
  */
 export function launchSession(req: LaunchRequest): LaunchResult {
-  if (!req.prompt?.trim()) throw new Error('prompt is required');
-  validateModelMode(req.model, req.permissionMode);
+  const images = validateImages(req.images);
+  if (!req.prompt?.trim() && !images.length) throw new Error('prompt or an image is required');
+  validateModelMode(req.model, req.permissionMode, req.effort);
   const id = crypto.randomUUID();
   const cwd = req.cwd || os.homedir();
   // Validate up front: an invalid cwd makes spawn fail ASYNChronously (ENOENT on the
@@ -141,10 +186,12 @@ export function launchSession(req: LaunchRequest): LaunchResult {
   const projectDir = projectSlug(cwd);
   const filePath = path.join(SESSIONS_ROOT, projectDir, `${id}.jsonl`);
 
-  // Prompt is NOT an arg — it's piped via stdin (see feedPrompt). Only safe flag
-  // tokens go on the command line.
+  // Prompt/images are NOT args — they're piped via stdin (see feedInput). Only safe
+  // flag tokens go on the command line.
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--session-id', id];
+  if (images.length) args.push('--input-format', 'stream-json'); // enable image content blocks on stdin
   if (req.model) args.push('--model', req.model);
+  if (req.effort) args.push('--effort', req.effort);
   if (req.permissionMode) args.push('--permission-mode', req.permissionMode);
 
   const peers = req.peers ? [...new Set(req.peers.filter((p) => p && p !== id))] : [];
@@ -167,7 +214,7 @@ export function launchSession(req: LaunchRequest): LaunchResult {
   // shell:true so the Windows `claude.cmd` shim resolves; the (safe) flag args are
   // pre-quoted. The prompt is written to stdin, bypassing the shell entirely.
   const child = spawn(command, { cwd, shell: true, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-  feedPrompt(child, req.prompt);
+  feedInput(child, req.prompt, images);
   trackChild(child, id, 'launch');
   pendingPaths.set(id, filePath); // let the stream route tail it before the file exists
 
@@ -178,7 +225,9 @@ export interface ResumeRequest {
   prompt: string;
   cwd: string; // the existing session's cwd — resume must run in the same dir
   model?: string;
+  effort?: string; // low | medium | high | xhigh | max (CLI --effort)
   permissionMode?: string;
+  images?: PromptImage[]; // pasted/attached screenshots, sent as image content blocks
   dryRun?: boolean;
 }
 
@@ -194,14 +243,17 @@ export interface ResumeResult {
  * continuation with no extra wiring.
  */
 export function resumeSession(id: string, req: ResumeRequest): ResumeResult {
-  if (!req.prompt?.trim()) throw new Error('prompt is required');
+  const images = validateImages(req.images);
+  if (!req.prompt?.trim() && !images.length) throw new Error('prompt or an image is required');
   if (!id) throw new Error('session id is required');
-  validateModelMode(req.model, req.permissionMode);
+  validateModelMode(req.model, req.permissionMode, req.effort);
   if (!isDir(req.cwd)) throw new Error(`working directory does not exist: ${req.cwd}`);
 
-  // Prompt piped via stdin (see feedPrompt); only safe flag tokens on the command line.
+  // Prompt/images piped via stdin (see feedInput); only safe flag tokens on the command line.
   const args = ['-p', '--resume', id, '--output-format', 'stream-json', '--verbose'];
+  if (images.length) args.push('--input-format', 'stream-json'); // enable image content blocks on stdin
   if (req.model) args.push('--model', req.model);
+  if (req.effort) args.push('--effort', req.effort);
   if (req.permissionMode) args.push('--permission-mode', req.permissionMode);
 
   // Re-attach the peers MCP server if this session has an allowlist (so collaboration
@@ -215,7 +267,7 @@ export function resumeSession(id: string, req: ResumeRequest): ResumeResult {
   if (hasPeers) writeMcpConfig(id);
 
   const child = spawn(command, { cwd: req.cwd, shell: true, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-  feedPrompt(child, req.prompt);
+  feedInput(child, req.prompt, images);
   trackChild(child, id, 'resume');
 
   return { id, command, spawned: true };
@@ -225,14 +277,18 @@ export function resumeSession(id: string, req: ResumeRequest): ResumeResult {
 // must still be validated so nothing dangerous reaches the shell command line:
 //  - model: must look like a claude model id (charset has NO shell metacharacters).
 //  - permissionMode: strict enum.
+//  - effort: strict enum.
 // (session id is server-generated; resume id is route-validated as a UUID.)
 const MODEL_RE = /^claude-[a-z0-9][a-z0-9._-]{0,60}$/i;
 const PERMISSION_MODES = new Set(['default', 'plan', 'acceptEdits', 'bypassPermissions']);
+export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+const EFFORTS = new Set<string>(EFFORT_LEVELS);
 
-export function validateModelMode(model?: string, permissionMode?: string): void {
+export function validateModelMode(model?: string, permissionMode?: string, effort?: string): void {
   if (model && !MODEL_RE.test(model)) throw new Error(`invalid model: ${model}`);
   if (permissionMode && !PERMISSION_MODES.has(permissionMode))
     throw new Error(`invalid permissionMode: ${permissionMode}`);
+  if (effort && !EFFORTS.has(effort)) throw new Error(`invalid effort: ${effort}`);
 }
 
 // Quote for spawn(command, { shell: true }), which on Windows is cmd.exe. The safe

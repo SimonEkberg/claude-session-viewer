@@ -41,11 +41,18 @@ body {
 /* Sidebar collapse (desktop only — on mobile the master-detail layout below handles
    showing one pane at a time). Collapsing gives the conversation the full width. */
 @media (min-width: 821px) {
+  /* The collapsed sidebar is display:none, so it leaves the grid entirely and <main>
+     auto-places into the FIRST column. That column must be the full-width one — the
+     old `0 1fr` put main in the 0-wide track and shrank the app to nothing. */
   .app.sidebar-collapsed {
-    grid-template-columns: 0 1fr;
+    grid-template-columns: 1fr;
   }
   .app.sidebar-collapsed .sidebar {
     display: none;
+  }
+  /* Keep the floating ☰ (position:fixed, top-left) off the session title. */
+  .app.sidebar-collapsed .session-header {
+    padding-left: 52px;
   }
 }
 .brand-row {
@@ -399,6 +406,57 @@ body {
   border-radius: 20px;
   padding: 1px 9px;
   color: var(--accent);
+}
+/* The raw value inside a pill (exact model id / effort level) next to its label. */
+.pill-sub {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Always-visible "what is this session running" chip in the title row. */
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 2px 4px 2px 10px;
+  font-size: 11.5px;
+  cursor: help;
+  white-space: nowrap;
+}
+.mc-model {
+  color: var(--accent);
+  font-weight: 600;
+}
+.mc-effort {
+  background: var(--bg-3);
+  border-radius: 20px;
+  padding: 1px 8px;
+  color: var(--muted);
+}
+.model-chip:not(:has(.mc-effort)) {
+  padding-right: 10px;
+}
+
+/* Sidebar card: same model/effort the detail card shows, so list and detail agree. */
+.si-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid var(--line);
+  color: var(--accent);
+  opacity: 0.85;
+}
+.si-effort {
+  color: var(--muted);
+  opacity: 0.9;
+}
+.si-effort::before {
+  content: '·';
+  margin-right: 4px;
 }
 .redacted-note {
   color: var(--reason);
@@ -888,6 +946,15 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+.row3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+.effort-note {
+  font-size: 11.5px;
+  margin-top: -4px;
 }
 .checkline {
   display: flex !important;
@@ -1683,6 +1750,95 @@ body {
   cursor: pointer;
 }
 
+/* New-session working-directory note / home warning */
+.cwd-note {
+  font-size: 11.5px;
+  margin: 4px 0 2px;
+  line-height: 1.4;
+}
+.cwd-note.muted {
+  color: var(--muted);
+}
+.cwd-note.warn {
+  color: var(--tool);
+}
+
+/* ---------- Pasted / attached prompt images ---------- */
+.img-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 2px;
+}
+.img-thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-2);
+  flex: none;
+}
+.img-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.img-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  line-height: 16px;
+  text-align: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(11, 14, 20, 0.78);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+.img-remove:hover {
+  background: var(--error);
+  color: #0b0e14;
+}
+.attach-btn {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 6px 9px;
+  cursor: pointer;
+  font-size: 14px;
+  flex: none;
+  align-self: flex-end;
+}
+.attach-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--muted);
+}
+.attach-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.attach-btn.inline {
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 11px;
+  vertical-align: middle;
+  align-self: auto;
+}
+.attach-note,
+.followup-note {
+  color: var(--tool);
+  font-size: 11.5px;
+  margin: 4px 0 0;
+}
+
 /* ---------- "Working in" location card (live, timeline tab) ---------- */
 .work-loc {
   flex: none;
@@ -1910,7 +2066,8 @@ body {
   .modal.browser {
     width: 97vw;
   }
-  .row2 {
+  .row2,
+  .row3 {
     grid-template-columns: 1fr;
   }
   .modal textarea,

@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import chokidar from 'chokidar';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PORT, HOST, CORS_ORIGINS, SESSIONS_ROOT, AUTH_MODE, ALLOWED_LOGINS } from './config.js';
@@ -19,7 +20,9 @@ const app = express();
 // Only the app's own UI origin may call this API from a browser (not arbitrary
 // sites). Same-origin / no-Origin requests (the Vite proxy, curl) are unaffected.
 app.use(cors({ origin: CORS_ORIGINS, credentials: true }));
-app.use(express.json({ limit: '1mb' }));
+// 25mb: prompts can now carry base64 screenshot(s) (launch.ts caps each ~5MB and the
+// count at 10). Bad/oversized bodies still surface as JSON via the error handler.
+app.use(express.json({ limit: '25mb' }));
 
 // Tailscale-identity gate (enabled with AUTH_MODE=tailscale). Gates EVERY request
 // — the UI and the API — so viewing is protected too, not just mutations. The
@@ -44,8 +47,9 @@ app.get('/api/health', (_req, res) => {
 
 app.get('/api/projects', (_req, res) => {
   // `reveal` tells the UI whether the "reveal in file manager" action is available
-  // (loopback only — see the /api/reveal route).
-  res.json({ sessionsRoot: SESSIONS_ROOT, projects: listProjects(), reveal: AUTH_MODE === 'off' });
+  // (loopback only — see the /api/reveal route). `home` lets the New-session dialog
+  // warn when the chosen working directory is just your home folder.
+  res.json({ sessionsRoot: SESSIONS_ROOT, home: os.homedir(), projects: listProjects(), reveal: AUTH_MODE === 'off' });
 });
 
 app.get('/api/sessions', (req, res) => {
@@ -191,7 +195,9 @@ app.post('/api/sessions/:id/prompt', (req, res) => {
       prompt: req.body?.prompt,
       cwd: req.body?.cwd || session.cwd || process.cwd(),
       model: req.body?.model,
+      effort: req.body?.effort,
       permissionMode: req.body?.permissionMode,
+      images: req.body?.images,
       dryRun: req.body?.dryRun,
     });
     res.json(result);

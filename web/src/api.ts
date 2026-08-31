@@ -4,6 +4,7 @@ import type {
   LaunchResult,
   PeersResponse,
   ProjectInfo,
+  PromptImage,
   ResumeResult,
   SessionSummary,
   UsageWindowsResponse,
@@ -30,7 +31,8 @@ async function errText(r: Response): Promise<string> {
 }
 
 export const api = {
-  projects: () => j<{ sessionsRoot: string; projects: ProjectInfo[]; reveal: boolean }>('/api/projects'),
+  projects: () =>
+    j<{ sessionsRoot: string; home: string; projects: ProjectInfo[]; reveal: boolean }>('/api/projects'),
   /** Open a file in the OS file manager on the host (loopback-only; 403 otherwise). */
   reveal: async (path: string): Promise<void> => {
     const r = await fetch('/api/reveal', {
@@ -64,8 +66,10 @@ export const api = {
     prompt: string;
     cwd?: string;
     model?: string;
+    effort?: string;
     permissionMode?: string;
     peers?: string[];
+    images?: PromptImage[];
     dryRun?: boolean;
   }): Promise<LaunchResult> => {
     const r = await fetch('/api/sessions', {
@@ -97,7 +101,15 @@ export const api = {
   },
   resume: async (
     id: string,
-    body: { prompt: string; cwd?: string; model?: string; permissionMode?: string; dryRun?: boolean },
+    body: {
+      prompt: string;
+      cwd?: string;
+      model?: string;
+      effort?: string;
+      permissionMode?: string;
+      images?: PromptImage[];
+      dryRun?: boolean;
+    },
   ): Promise<ResumeResult> => {
     const r = await fetch(`/api/sessions/${id}/prompt`, {
       method: 'POST',

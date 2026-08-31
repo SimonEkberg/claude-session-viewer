@@ -74,7 +74,10 @@ export interface SessionSummary {
   cwd: string | null;
   gitBranch: string | null;
   version: string | null;
+  /** Model of the newest real assistant turn — what the session is running now. */
   model: string | null;
+  /** Reasoning effort of the newest assistant turn, if the CLI recorded one. */
+  effort: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   mtimeMs: number;
@@ -137,6 +140,12 @@ export interface UsageWindow {
 export interface UsageWindowsResponse {
   computedAt: string;
   windows: UsageWindow[];
+}
+
+/** An image attached to a prompt, sent to the CLI as a base64 image content block. */
+export interface PromptImage {
+  media_type: string; // image/png | image/jpeg | image/gif | image/webp
+  data: string; // base64, WITHOUT the "data:<type>;base64," prefix
 }
 
 /** A session that can be added to another session's read-only peer allowlist. */
