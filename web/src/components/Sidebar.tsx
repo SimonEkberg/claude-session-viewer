@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectInfo, SessionSummary } from '../types';
 import { timeAgo } from '../util';
+import { modelLabel } from '../constants';
 
 export function Sidebar({
   sessions,
@@ -159,6 +160,14 @@ export function Sidebar({
                   <span className="dotsep">·</span>
                   <span>{s.counts.toolCalls} tools</span>
                   {s.counts.errors > 0 && <span className="err">· {s.counts.errors} err</span>}
+                  {/* Same source as the detail card's pill (newest turn), so the list
+                      and the open session always agree on the model. */}
+                  {s.model && (
+                    <span className="si-model" title={`${s.model}${s.effort ? ` · effort ${s.effort}` : ''}`}>
+                      {modelLabel(s.model)}
+                      {s.effort && <span className="si-effort">{s.effort}</span>}
+                    </span>
+                  )}
                 </div>
                 <div className="si-cwd" title={s.cwd || ''}>
                   {s.cwd || s.projectDir}

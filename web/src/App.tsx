@@ -15,7 +15,17 @@ export function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [sessionsRoot, setSessionsRoot] = useState('');
+  const [home, setHome] = useState('');
   const [canReveal, setCanReveal] = useState(false); // "reveal in file manager" available (loopback only)
+  // Remember the last working directory a session was launched in, so the next New
+  // Session defaults there instead of snapping back to home. This is the fix for
+  // "new sessions keep originating in C:\Users\simon".
+  const [lastCwd, setLastCwd] = useState(() => localStorage.getItem('csv.lastCwd') || '');
+  const rememberCwd = useCallback((c: string) => {
+    if (!c) return;
+    localStorage.setItem('csv.lastCwd', c);
+    setLastCwd(c);
+  }, []);
   const [loading, setLoading] = useState(true);
   // Collapse the left session list (desktop) to give the conversation more width.
   // On mobile the master-detail layout already hides it, so this only affects desktop.
@@ -93,10 +103,11 @@ export function App() {
   const working = live && (serverActive || pulse || tailPending);
 
   const refreshList = useCallback(async () => {
-    const [{ sessions }, { projects, sessionsRoot, reveal }] = await Promise.all([api.sessions(), api.projects()]);
+    const [{ sessions }, { projects, sessionsRoot, home, reveal }] = await Promise.all([api.sessions(), api.projects()]);
     setSessions(sessions);
     setProjects(projects);
     setSessionsRoot(sessionsRoot);
+    setHome(home);
     setCanReveal(reveal);
     setLoading(false);
   }, []);
@@ -242,7 +253,9 @@ export function App() {
     [selectedId, stopLive, refreshList],
   );
 
-  const defaultCwd = session?.cwd || projects[0]?.cwdGuess || '';
+  // Prefer where you last launched (a stable baseline), then the open session's dir,
+  // then the busiest project. Keeps new sessions out of home unless you pick it.
+  const defaultCwd = lastCwd || session?.cwd || projects[0]?.cwdGuess || '';
 
   return (
     <div className={`app mobile-${mobilePane} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -297,13 +310,19 @@ export function App() {
               {tab === 'files' && <FilesPanel session={session} canReveal={canReveal} />}
               {tab === 'review' && <ReviewPanel id={session.id} />}
             </div>
-            <FollowUpBar session={session} onSent={onFollowUp} active={live && serverActive} />
+            <FollowUpBar key={session.id} session={session} onSent={onFollowUp} active={live && serverActive} />
           </>
         )}
       </main>
 
       {showNew && (
-        <NewSessionDialog defaultCwd={defaultCwd} onClose={() => setShowNew(false)} onLaunched={onLaunched} />
+        <NewSessionDialog
+          defaultCwd={defaultCwd}
+          home={home}
+          onCwdChosen={rememberCwd}
+          onClose={() => setShowNew(false)}
+          onLaunched={onLaunched}
+        />
       )}
     </div>
   );

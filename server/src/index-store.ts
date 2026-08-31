@@ -120,18 +120,71 @@ export function deleteSession(id: string): { deleted: string[] } {
   return { deleted };
 }
 
+// projectSlug is lossy (it replaces '/', '\' and ':' all with '-'), so a project
+// folder name can't be reliably turned back into a real path — any directory that
+// genuinely contains '-' gets mangled. Every session in one project folder shares
+// the same cwd (the folder name is derived from it), so we read the REAL cwd out of
+// one transcript instead. Cached by that file's mtime so it costs ~nothing per call.
+const projectCwdCache = new Map<string, { mtimeMs: number; cwd: string | null }>();
+
+/** Best-effort inverse of projectSlug — only correct for paths without a real '-'. */
+function slugToPath(dir: string): string {
+  return dir.replace(/^([A-Za-z])-/, '$1:\\').replace(/-/g, '\\');
+}
+
+/** The cwd recorded in a transcript's first lines (Claude Code stamps it per line). */
+function sampleCwd(file: string): string | null {
+  let mtimeMs = 0;
+  try {
+    mtimeMs = fs.statSync(file).mtimeMs;
+  } catch {
+    return null;
+  }
+  const hit = projectCwdCache.get(file);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.cwd;
+
+  let cwd: string | null = null;
+  try {
+    const fd = fs.openSync(file, 'r');
+    try {
+      const buf = Buffer.alloc(65536); // the cwd is on the first line(s); no need to read the whole file
+      const n = fs.readSync(fd, buf, 0, buf.length, 0);
+      for (const line of buf.toString('utf8', 0, n).split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const o = JSON.parse(line);
+          if (typeof o.cwd === 'string' && o.cwd) {
+            cwd = o.cwd;
+            break;
+          }
+        } catch {
+          /* a truncated final line in the chunk — earlier lines already tried */
+        }
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    /* unreadable — fall back to the slug */
+  }
+  projectCwdCache.set(file, { mtimeMs, cwd });
+  return cwd;
+}
+
 export function listProjects(): ProjectInfo[] {
-  const counts = new Map<string, number>();
+  // One sample transcript per project is enough to recover its real cwd.
+  const info = new Map<string, { count: number; sample: string }>();
   for (const f of listTranscriptFiles()) {
     const dir = path.basename(path.dirname(f));
-    counts.set(dir, (counts.get(dir) || 0) + 1);
+    const e = info.get(dir);
+    if (e) e.count++;
+    else info.set(dir, { count: 1, sample: f });
   }
-  return [...counts.entries()]
-    .map(([dir, sessionCount]) => ({
+  return [...info.entries()]
+    .map(([dir, e]) => ({
       dir,
-      // best-effort inverse of the projectSlug encoding for display
-      cwdGuess: dir.replace(/^([A-Za-z])-/, '$1:\\').replace(/-/g, '\\'),
-      sessionCount,
+      cwdGuess: sampleCwd(e.sample) || slugToPath(dir),
+      sessionCount: e.count,
     }))
     .sort((a, b) => b.sessionCount - a.sessionCount);
 }

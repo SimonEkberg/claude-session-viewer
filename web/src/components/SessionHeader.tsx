@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type { Focus, FullSession, UsageWindow } from '../types';
 import { fileName, usd, tokens, copyText } from '../util';
+import { modelLabel } from '../constants';
 import { DiffDialog } from './DiffDialog';
 import { EditSessionDialog } from './EditSessionDialog';
 import type { SessionUsage } from '../types';
@@ -80,6 +81,19 @@ export function SessionHeader({
         </button>
         <h1 title={session.id}>{session.title}</h1>
         <div className="sh-status">
+          {/* Model + effort stay visible even with the details rows collapsed — it's
+              the thing you most need to know before sending another turn. */}
+          {(session.model || session.effort) && (
+            <span
+              className="model-chip"
+              title={`Newest turn ran on ${session.model ?? 'an unknown model'}${
+                session.effort ? ` at ${session.effort} effort` : ' (no effort recorded)'
+              }. Set the model/effort for the NEXT turn in the composer below.`}
+            >
+              {session.model && <span className="mc-model">{modelLabel(session.model)}</span>}
+              {session.effort && <span className="mc-effort">{session.effort}</span>}
+            </span>
+          )}
           {live && (
             <span className={`work-chip ${working ? 'working' : 'idle'}`}>
               {working ? (
@@ -115,7 +129,18 @@ export function SessionHeader({
         </button>
         {session.cwd && <span className="mono" title={session.cwd}>📁 {session.cwd}</span>}
         {session.gitBranch && <span className="mono">⑂ {session.gitBranch}</span>}
-        {session.model && <span className="pill">{session.model}</span>}
+        {/* Friendly name AND the raw id together, so the picker's label and the
+            transcript's model id can never look like two different things. */}
+        {session.model && (
+          <span className="pill" title="Model of the newest assistant turn — what this session is running now">
+            {modelLabel(session.model)} <span className="pill-sub mono">{session.model}</span>
+          </span>
+        )}
+        {session.effort && (
+          <span className="pill" title="Reasoning effort recorded on the newest assistant turn (CLI --effort)">
+            effort <span className="pill-sub mono">{session.effort}</span>
+          </span>
+        )}
         {session.version && <span className="muted">cc {session.version}</span>}
         {c.reasoning === 0 && c.reasoningRedacted > 0 && (
           <span className="redacted-note" title="Thinking blocks are present but carry only an encrypted signature, so the private reasoning text isn't in the transcript. The narrated 'why' is in the 'Claude says' cards.">

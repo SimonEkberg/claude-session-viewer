@@ -96,7 +96,10 @@ export interface SessionSummary {
   cwd: string | null;
   gitBranch: string | null;
   version: string | null;
+  /** Model of the NEWEST real assistant turn — what the session is running now. */
   model: string | null;
+  /** Reasoning effort of the newest assistant turn (low|medium|high|xhigh|max), if the CLI recorded one. */
+  effort: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   mtimeMs: number;
@@ -218,6 +221,7 @@ export function parseSession(filePath: string): FullSession {
   let gitBranch: string | null = null;
   let version: string | null = null;
   let model: string | null = null;
+  let effort: string | null = null;
   let createdAt: string | null = null;
   let updatedAt: string | null = null;
 
@@ -270,7 +274,15 @@ export function parseSession(filePath: string): FullSession {
     if (o.type === 'ai-title' && o.aiTitle) title = o.aiTitle;
 
     const msg = o.message;
-    if (msg?.model && msg.model !== '<synthetic>' && !model) model = msg.model;
+    // Model + effort describe what the session runs NOW, so the newest turn wins:
+    // a mid-session model/effort switch would otherwise be invisible behind whatever
+    // the session happened to start on. Sub-agent (sidechain) turns can run a
+    // different model/effort than the session itself, so they don't count; neither do
+    // synthetic API-error lines (model "<synthetic>", no effort).
+    if (o.type === 'assistant' && !o.isSidechain && !o.isApiErrorMessage) {
+      if (msg?.model && msg.model !== '<synthetic>') model = msg.model;
+      if (typeof o.effort === 'string' && o.effort) effort = o.effort;
+    }
 
     if (o.type === 'assistant' && msg) {
       // Count usage once per API message, and never for synthetic/API-error lines:
@@ -435,6 +447,7 @@ export function parseSession(filePath: string): FullSession {
     gitBranch,
     version,
     model,
+    effort,
     createdAt,
     updatedAt,
     mtimeMs: stat.mtimeMs,

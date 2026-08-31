@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { FullSession } from '../types';
-import { MODELS, PERMISSION_MODES } from '../constants';
+import { EFFORTS, MODELS, PERMISSION_MODES } from '../constants';
+import { useAttachedImages, ImageStrip } from '../attachments';
 
-const LS_MODEL = 'csv.model';
+// Model and effort are remembered PER SESSION (keyed by id) so a choice in one
+// session never bleeds into another. Permission mode stays a global preference.
+const modelKey = (id: string) => `csv.model.${id}`;
+const effortKey = (id: string) => `csv.effort.${id}`;
 const LS_MODE = 'csv.permissionMode';
 
 /**
@@ -23,17 +27,23 @@ export function FollowUpBar({
   active?: boolean; // a turn is already running for this session
 }) {
   const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState(() => localStorage.getItem(LS_MODEL) ?? '');
+  // Defaults to '' = "Session default" (keep whatever model this session runs). A
+  // per-session choice is remembered under this session's own key.
+  const [model, setModel] = useState(() => localStorage.getItem(modelKey(session.id)) ?? '');
+  const [effort, setEffort] = useState(() => localStorage.getItem(effortKey(session.id)) ?? '');
   const [mode, setMode] = useState(() => localStorage.getItem(LS_MODE) ?? 'default');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const att = useAttachedImages();
   // Block sending while a turn is in flight: two `claude --resume` processes
   // appending the same transcript concurrently corrupt it (the server also rejects
   // this with 409, but disabling here makes it obvious instead of an error).
   const blocked = busy || !!active;
 
-  useEffect(() => localStorage.setItem(LS_MODEL, model), [model]);
+  useEffect(() => localStorage.setItem(modelKey(session.id), model), [model, session.id]);
+  useEffect(() => localStorage.setItem(effortKey(session.id), effort), [effort, session.id]);
   useEffect(() => localStorage.setItem(LS_MODE, mode), [mode]);
 
   // Auto-grow the textarea up to a cap.
@@ -48,7 +58,7 @@ export function FollowUpBar({
   const canWrite = PERMISSION_MODES.find((m) => m.v === mode)?.writes;
 
   const send = async () => {
-    if (!prompt.trim() || blocked) return;
+    if ((!prompt.trim() && !att.images.length) || blocked) return;
     setError('');
     setBusy(true);
     try {
@@ -56,9 +66,12 @@ export function FollowUpBar({
         prompt,
         cwd: session.cwd || undefined,
         model: model || undefined,
+        effort: effort || undefined,
         permissionMode: mode,
+        images: att.images.length ? att.payload() : undefined,
       });
       setPrompt('');
+      att.clear();
       onSent();
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
@@ -82,6 +95,20 @@ export function FollowUpBar({
           </select>
         </label>
         <label className="ctl">
+          <span className="ctl-k">Effort</span>
+          <select
+            value={effort}
+            title={EFFORTS.find((e) => e.v === effort)?.hint}
+            onChange={(e) => setEffort(e.target.value)}
+          >
+            {EFFORTS.map((e) => (
+              <option key={e.v} value={e.v} title={e.hint}>
+                {e.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="ctl">
           <span className="ctl-k">
             Permission {canWrite ? <span className="write-on" title="File writes allowed">✎ can write</span> : <span className="write-off" title="Read-only">read-only</span>}
           </span>
@@ -94,7 +121,28 @@ export function FollowUpBar({
           </select>
         </label>
       </div>
-      <div className="followup-row">
+      <ImageStrip images={att.images} onRemove={att.remove} />
+      {att.note && <div className="followup-note">{att.note}</div>}
+      <div className="followup-row" onDrop={att.onDrop} onDragOver={(e) => e.preventDefault()}>
+        <button
+          className="attach-btn"
+          title="Attach image (or just paste a screenshot)"
+          disabled={blocked}
+          onClick={() => fileRef.current?.click()}
+        >
+          📎
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files) att.addFiles(e.target.files);
+            e.target.value = ''; // let re-picking the same file fire onChange again
+          }}
+        />
         <textarea
           ref={taRef}
           className="followup-input"
@@ -102,11 +150,12 @@ export function FollowUpBar({
           placeholder={
             active
               ? 'A turn is running… wait for it to finish'
-              : 'Send a follow-up prompt…  (Enter to send · Shift+Enter for newline)'
+              : 'Send a follow-up prompt…  (Enter to send · Shift+Enter for newline · paste a screenshot)'
           }
           value={prompt}
           disabled={blocked}
           onChange={(e) => setPrompt(e.target.value)}
+          onPaste={att.onPaste}
           onKeyDown={(e) => {
             // Don't send on the Enter that COMMITS an IME composition (dead keys,
             // CJK candidates) — that Enter isn't "submit", it's "accept character".
@@ -117,7 +166,11 @@ export function FollowUpBar({
             }
           }}
         />
-        <button className="btn primary send" disabled={blocked || !prompt.trim()} onClick={send}>
+        <button
+          className="btn primary send"
+          disabled={blocked || (!prompt.trim() && !att.images.length)}
+          onClick={send}
+        >
           {busy ? 'Sending…' : active ? 'Running…' : 'Send ↵'}
         </button>
       </div>
