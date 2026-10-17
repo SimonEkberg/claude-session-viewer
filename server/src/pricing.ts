@@ -12,16 +12,39 @@ export interface ModelRate {
   output: number;
 }
 
+// Snapshot refreshed 2026-10-17 from platform.claude.com/docs/en/about-claude/models/overview.
 const BASE: Record<string, ModelRate> = {
+  'claude-fable-5-1': { input: 10, output: 50 },
+  'claude-mythos-5-1': { input: 10, output: 50 },
+  'claude-opus-5-5': { input: 4, output: 20 },
+  'claude-sonnet-5-5': { input: 2, output: 10 },
+  'claude-haiku-5-5': { input: 0.1, output: 0.5 }, // "from" price — tiers may exceed this
+  'claude-fable-5': { input: 10, output: 50 },
+  'claude-mythos-5': { input: 10, output: 50 },
+  'claude-opus-5': { input: 5, output: 25 },
   'claude-opus-4-8': { input: 5, output: 25 },
   'claude-opus-4-7': { input: 5, output: 25 },
   'claude-opus-4-6': { input: 5, output: 25 },
-  'claude-sonnet-5': { input: 2, output: 10 }, // intro through 2026-08-31; standard 3/15
+  'claude-opus-4-5': { input: 5, output: 25 },
+  'claude-sonnet-5': { input: 2, output: 10 },
   'claude-sonnet-4-6': { input: 3, output: 15 },
-  'claude-fable-5': { input: 10, output: 50 },
-  'claude-mythos-5': { input: 10, output: 50 },
   'claude-haiku-4-5': { input: 1, output: 5 },
 };
+
+/**
+ * Cache-read cost is no longer one flat 10% of input everywhere: Fable/Mythos 5.1
+ * read at 2.5% and Opus/Sonnet 5.5 at 5%. Unknown models keep the standard 10%.
+ */
+const CACHE_READ_BY_MODEL: Record<string, number> = {
+  'claude-fable-5-1': 0.025,
+  'claude-mythos-5-1': 0.025,
+  'claude-opus-5-5': 0.05,
+  'claude-sonnet-5-5': 0.05,
+};
+
+export function cacheReadMultFor(model: string | undefined | null): number {
+  return (model && CACHE_READ_BY_MODEL[model]) || CACHE_READ;
+}
 
 const OVERRIDES: Record<string, ModelRate> = (() => {
   try {
@@ -35,13 +58,14 @@ export const CACHE_WRITE_5M = 1.25;
 export const CACHE_WRITE_1H = 2;
 export const CACHE_READ = 0.1;
 
-// Family fallback so a NEW model (e.g. claude-opus-5) is priced by its tier
-// instead of silently showing $0. Marked `estimated` so the UI can flag it.
+// Family fallback so a NEW model is priced by its tier instead of silently showing
+// $0. An unknown id is almost certainly newer than everything in BASE, so each tier
+// uses its newest generation's rate. Marked `estimated` so the UI can flag it.
 const FAMILY: [RegExp, ModelRate][] = [
-  [/haiku/i, { input: 1, output: 5 }],
+  [/haiku/i, { input: 0.1, output: 0.5 }],
   [/(fable|mythos)/i, { input: 10, output: 50 }],
-  [/opus/i, { input: 5, output: 25 }],
-  [/sonnet/i, { input: 3, output: 15 }],
+  [/opus/i, { input: 4, output: 20 }],
+  [/sonnet/i, { input: 2, output: 10 }],
 ];
 
 export function rateFor(model: string | undefined | null): { rate: ModelRate; estimated: boolean } | null {
@@ -113,7 +137,7 @@ function priceOne(model: string | undefined | null, u: RawUsage): UsageDelta {
     cost =
       (input * rate.input +
         output * rate.output +
-        cacheRead * rate.input * CACHE_READ +
+        cacheRead * rate.input * cacheReadMultFor(model) +
         cw5m * rate.input * CACHE_WRITE_5M +
         cw1h * rate.input * CACHE_WRITE_1H) /
       1_000_000;

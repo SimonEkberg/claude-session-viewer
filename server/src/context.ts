@@ -9,6 +9,11 @@
  * (JSON) if a new model appears.
  */
 const WINDOWS: Record<string, number> = {
+  'claude-fable-5-1': 1_000_000,
+  'claude-mythos-5-1': 1_000_000,
+  'claude-opus-5-5': 1_000_000,
+  'claude-sonnet-5-5': 1_000_000,
+  'claude-haiku-5-5': 1_000_000, // first 1M-window Haiku — the /haiku/ 200K fallback must not catch it
   'claude-opus-5': 1_000_000,
   'claude-opus-4-8': 1_000_000,
   'claude-opus-4-7': 1_000_000,

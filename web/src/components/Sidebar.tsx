@@ -160,6 +160,14 @@ export function Sidebar({
                   <span className="dotsep">·</span>
                   <span>{s.counts.toolCalls} tools</span>
                   {s.counts.errors > 0 && <span className="err">· {s.counts.errors} err</span>}
+                  {(s.agents || []).some((a) => a.orphaned) && (
+                    <span
+                      className="si-orphan"
+                      title={`${(s.agents || []).filter((a) => a.orphaned).length} background agent(s) were killed before finishing`}
+                    >
+                      ⚠ agent
+                    </span>
+                  )}
                   {/* Same source as the detail card's pill (newest turn), so the list
                       and the open session always agree on the model. */}
                   {s.model && (

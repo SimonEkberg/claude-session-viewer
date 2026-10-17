@@ -4,7 +4,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CLAUDE_BIN, SESSIONS_ROOT, DATA_DIR, projectSlug } from './config.js';
+import { BG_WAIT_CEILING_MS, CLAUDE_BIN, SESSIONS_ROOT, DATA_DIR, projectSlug } from './config.js';
+
+/**
+ * Environment for every spawned `claude` turn. CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS
+ * raises the CLI's 10-minute grace for background agents/tasks that outlive the
+ * turn's reply — the cause of "the reviewer agent never finishes" (its 15-20 min
+ * Release-build review was killed at exactly 10:00 by the default ceiling).
+ */
+function spawnEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: String(BG_WAIT_CEILING_MS) };
+}
 import { markActive, markInactive } from './activity.js';
 import { getPeers, setPeers } from './peers.js';
 
@@ -213,7 +223,7 @@ export function launchSession(req: LaunchRequest): LaunchResult {
 
   // shell:true so the Windows `claude.cmd` shim resolves; the (safe) flag args are
   // pre-quoted. The prompt is written to stdin, bypassing the shell entirely.
-  const child = spawn(command, { cwd, shell: true, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(command, { cwd, shell: true, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: spawnEnv() });
   feedInput(child, req.prompt, images);
   trackChild(child, id, 'launch');
   pendingPaths.set(id, filePath); // let the stream route tail it before the file exists
@@ -266,7 +276,7 @@ export function resumeSession(id: string, req: ResumeRequest): ResumeResult {
 
   if (hasPeers) writeMcpConfig(id);
 
-  const child = spawn(command, { cwd: req.cwd, shell: true, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(command, { cwd: req.cwd, shell: true, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: spawnEnv() });
   feedInput(child, req.prompt, images);
   trackChild(child, id, 'resume');
 

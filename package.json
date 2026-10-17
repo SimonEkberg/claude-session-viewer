@@ -10,9 +10,12 @@
   ],
   "scripts": {
     "check": "node scripts/check.mjs",
+    "serve": "node scripts/serve.mjs",
+    "predev": "node scripts/serve.mjs --check-dev",
     "dev": "concurrently -n server,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
     "build": "npm run build -w web",
-    "start": "npm run start -w server"
+    "start": "npm run start -w server",
+    "test": "npm run test -w server"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

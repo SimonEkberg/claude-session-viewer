@@ -15,10 +15,17 @@ git clone <this-repo-url> claude-session-viewer
 cd claude-session-viewer
 npm install      # installs web + server (npm workspaces)
 npm run check    # compatibility preflight — tells you what's ready
-npm run dev      # server on 127.0.0.1:3737, web on :5273
+npm run serve    # THE one command for using the app: builds, configures, starts
 ```
 
-Open <http://localhost:5273>.
+`npm run serve` builds `web/dist`, reads your identity from Tailscale when present (no
+env vars to remember), starts gated on `127.0.0.1:3737`, and prints the URL to open.
+If something already holds the port it names the pid (`-- --force` takes the port).
+
+For **developing** the viewer itself use `npm run dev` (hot reload at
+<http://localhost:5273>) — note it refuses to start while `tailscale serve` is
+proxying the port, and tells you why and what to do. `npm test` runs the unit tests
+(parser, pricing, queue, validation).
 
 **Prerequisites**
 
@@ -45,7 +52,9 @@ Nothing is hardcoded to a specific user or path — `SESSIONS_ROOT`, `CLAUDE_BIN
 - **Files tab** — every file read/edited/written, filter by action, and a **git-style diff** for each Write/Edit.
 - **Cost + context** — per-session token cost (priced per model, cache-aware; unknown models estimated by tier), rolling 5h/24h/7d usage, and a **context-window meter** showing how close the session is to auto-compaction.
 - **Live "working" indicator** — driven by the CLI process lifetime, so it stays lit through the thinking phase and clears only when the turn truly ends.
-- **New session / follow-up** — start or resume a session (model + permission-mode picker, directory browser), then **live-tail** it. The prompt is piped via stdin, so multi-line pastes and shell characters are safe.
+- **New session / follow-up** — start or resume a session (model, **effort** and permission-mode pickers, directory browser), then **live-tail** it. The prompt is piped via stdin, so multi-line pastes and shell characters are safe. The model list is **live**: a curated current lineup (from `GET /api/models`) merged with every model actually observed in your transcripts, so new models appear without a code change. The session's **current model + effort** (from its newest turn) show in the header and the sidebar.
+- **Queue a follow-up mid-turn** — you can always type; if a turn is running the prompt is parked **on the server** and sent the moment that turn's process exits (two concurrent `--resume`s would corrupt the transcript, so it never sends into a live turn). Drafts persist per session, so switching sessions doesn't eat what you wrote.
+- **Orphaned-agent flag** — background sub-agents live inside the parent `claude` process and get killed when it exits (the CLI's default grace is 10 minutes). The viewer detects agents that never finished — from the `stopped` notification *and* from the agent's own transcript going quiet mid-loop — and flags them in the header and sidebar instead of leaving a silent gap. Launched turns also get `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` raised (default 60 min, see `BG_WAIT_CEILING_MS`) so long-running background agents survive in the first place.
 - **Review export** — a de-noised Markdown trace at `/api/sessions/:id/review.md` for a human or another agent to review.
 - **Session collaboration (read-only)** — let a session **read** other sessions you allowlist, via MCP tools the viewer hosts (`list_peers` / `read_peer`). One-way and allowlist-enforced; configure it in the New Session dialog or the ⚙ on any open session. See [Session collaboration](#session-collaboration-read-only).
 - **Roomier view** — collapse the sidebar (◀) and the header details (**▴ details**) to give the decision map the full screen; both persist. On phones/tablets the master-detail layout already gives the conversation the full screen.
@@ -89,6 +98,8 @@ Let one session **read** another's work — handy when a reviewer session needs 
 | `AUTO_COMPACT_PCT` | `0.92` | Estimated fraction of the context window at which Claude Code auto-compacts (the real trigger isn't stored locally). |
 | `CONTEXT_WINDOW_OVERRIDES` | — | JSON map of model→window tokens for unknown models. |
 | `PRICING_OVERRIDES` | — | JSON map of model→`{input,output}` $/Mtok to override built-in rates. |
+| `BG_WAIT_CEILING_MS` | `3600000` | Passed to spawned turns as `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`: how long a finished turn keeps waiting for its background agents before the CLI exits and kills them. The CLI default is a hard 10 min; `0` = wait indefinitely. |
+| `BROWSE_ROOTS` | — | Extra directories the New-Session cwd picker may browse when the server is exposed (gated mode confines browsing to home + sessions root + these). |
 
 ## ⚠️ Security — read before exposing it anywhere
 

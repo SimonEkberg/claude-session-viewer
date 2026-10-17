@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 import type { Focus, FullSession, ProjectInfo, SessionSummary } from './types';
 import { Sidebar } from './components/Sidebar';
+import { MODELS, mergeModelOptions, type ModelChoice } from './constants';
 import { SessionHeader, FilesPanel } from './components/SessionHeader';
 import { Timeline } from './components/Timeline';
 import { WorkingLocation } from './components/WorkingLocation';
@@ -50,6 +51,18 @@ export function App() {
   const [focus, setFocus] = useState<Focus | null>(null);
   const [pulse, setPulse] = useState(false); // brief "just got an update" flag
   const [serverActive, setServerActive] = useState(false); // a claude process is running for this session
+  const [queuedCount, setQueuedCount] = useState(0); // follow-ups parked for this session
+  // Live model list (curated lineup + models observed in local transcripts). Falls
+  // back to the static MODELS constant inside mergeModelOptions when the call fails.
+  const [modelChoices, setModelChoices] = useState<ModelChoice[]>(MODELS);
+  useEffect(() => {
+    api
+      .models()
+      .then((r) => setModelChoices(mergeModelOptions(r)))
+      .catch(() => {
+        /* static fallback already in place */
+      });
+  }, []);
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set()); // all running sessions (machine-wide)
   // Sessions that went running → idle since you last looked at them: a "finished,
   // ready to continue" cue in the sidebar. Cleared when you open the session.
@@ -164,12 +177,17 @@ export function App() {
     [stopLive, refreshList],
   );
 
+  const onActivity = useCallback((a: { active: boolean; queued: number }) => {
+    setServerActive(a.active);
+    setQueuedCount(a.queued);
+  }, []);
+
   const goLive = useCallback(
     (id: string) => {
       setLive(true);
-      unsubRef.current = api.stream(id, onSessionUpdate, setServerActive, onStreamEnd);
+      unsubRef.current = api.stream(id, onSessionUpdate, onActivity, onStreamEnd);
     },
-    [onSessionUpdate, onStreamEnd],
+    [onSessionUpdate, onActivity, onStreamEnd],
   );
 
   const openSession = useCallback(
@@ -310,7 +328,14 @@ export function App() {
               {tab === 'files' && <FilesPanel session={session} canReveal={canReveal} />}
               {tab === 'review' && <ReviewPanel id={session.id} />}
             </div>
-            <FollowUpBar key={session.id} session={session} onSent={onFollowUp} active={live && serverActive} />
+            <FollowUpBar
+              key={session.id}
+              session={session}
+              onSent={onFollowUp}
+              active={live && serverActive}
+              queuedHint={queuedCount}
+              models={modelChoices}
+            />
           </>
         )}
       </main>
@@ -319,6 +344,7 @@ export function App() {
         <NewSessionDialog
           defaultCwd={defaultCwd}
           home={home}
+          models={modelChoices}
           onCwdChosen={rememberCwd}
           onClose={() => setShowNew(false)}
           onLaunched={onLaunched}

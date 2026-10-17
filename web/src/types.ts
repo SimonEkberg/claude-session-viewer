@@ -66,6 +66,34 @@ export interface SessionContext {
   toCompactPct: number;
 }
 
+/**
+ * A sub-agent dispatched from a session. Background agents run inside the parent
+ * claude process, so a one-shot `claude -p --resume` turn can exit out from under one
+ * and kill it mid-run — that's `orphaned`. Foreground agents block the turn and can't
+ * be orphaned.
+ */
+export interface AgentInfo {
+  agentId: string | null;
+  toolUseId: string;
+  description: string;
+  agentType: string | null;
+  background: boolean;
+  dispatchedAt: string | null;
+  endedAt: string | null;
+  status: 'running' | 'completed' | 'stopped' | 'failed' | 'killed';
+  orphaned: boolean;
+}
+
+/** A follow-up parked while a turn was running; sent when that turn's process exits. */
+export interface QueuedTurn {
+  prompt: string;
+  queuedAt: string;
+  model: string | null;
+  effort: string | null;
+  permissionMode: string | null;
+  images: number;
+}
+
 export interface SessionSummary {
   id: string;
   projectDir: string;
@@ -78,6 +106,8 @@ export interface SessionSummary {
   model: string | null;
   /** Reasoning effort of the newest assistant turn, if the CLI recorded one. */
   effort: string | null;
+  /** Sub-agents dispatched from this session, and whether each one actually landed. */
+  agents: AgentInfo[];
   createdAt: string | null;
   updatedAt: string | null;
   mtimeMs: number;
