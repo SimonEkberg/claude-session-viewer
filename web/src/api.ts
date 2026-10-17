@@ -5,6 +5,7 @@ import type {
   PeersResponse,
   ProjectInfo,
   PromptImage,
+  QueuedTurn,
   ResumeResult,
   SessionSummary,
   UsageWindowsResponse,
@@ -109,21 +110,36 @@ export const api = {
       permissionMode?: string;
       images?: PromptImage[];
       dryRun?: boolean;
+      /** Park the prompt instead of 409ing when a turn is already running. */
+      queueIfBusy?: boolean;
     },
-  ): Promise<ResumeResult> => {
+  ): Promise<ResumeResult & { queued?: boolean; queuedAt?: string }> => {
     const r = await fetch(`/api/sessions/${id}/prompt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     if (!r.ok) throw new Error(await errText(r));
-    return (await r.json()) as ResumeResult;
+    return (await r.json()) as ResumeResult & { queued?: boolean; queuedAt?: string };
+  },
+  /** Models the composer can offer: curated current lineup + locally observed. */
+  models: () =>
+    j<{
+      curated: { id: string; label: string; note?: string }[];
+      observed: { id: string; label: string }[];
+    }>('/api/models'),
+  /** The follow-up parked for this session, if any. */
+  queue: (id: string) => j<{ queued: QueuedTurn | null }>(`/api/sessions/${id}/queue`),
+  clearQueue: async (id: string): Promise<{ cleared: boolean }> => {
+    const r = await fetch(`/api/sessions/${id}/queue`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await errText(r));
+    return r.json();
   },
   /** Subscribe to live session updates via SSE. Returns an unsubscribe fn. */
   stream(
     id: string,
     onSession: (s: FullSession) => void,
-    onActivity?: (active: boolean) => void,
+    onActivity?: (a: { active: boolean; queued: number }) => void,
     onError?: (e: string) => void,
   ): () => void {
     const es = new EventSource(`/api/sessions/${id}/stream`);
@@ -136,7 +152,8 @@ export const api = {
     });
     es.addEventListener('activity', (ev) => {
       try {
-        onActivity?.(JSON.parse((ev as MessageEvent).data).active);
+        const d = JSON.parse((ev as MessageEvent).data);
+        onActivity?.({ active: !!d.active, queued: d.queued || 0 });
       } catch {
         /* ignore */
       }

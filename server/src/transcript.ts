@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { priceUsage, type RawUsage } from './pricing.js';
 import { computeContext, type SessionContext } from './context.js';
+import { agentOutcome } from './subagents.js';
 
 /**
  * The transcript parser + normalizer.
@@ -88,6 +89,30 @@ export interface SessionUsage {
   byModel: Record<string, { tokens: number; costUsd: number }>;
 }
 
+/**
+ * A sub-agent dispatched from this session with the Agent/Task tool.
+ *
+ * Background ("async") agents live inside the parent claude process: the dispatch
+ * returns immediately and the report arrives later as a <task-notification>. If the
+ * process exits first — which is what a one-shot `claude -p --resume` turn does
+ * shortly after it replies — the agent is killed mid-run and its work is lost. Claude
+ * Code reports that as a notification with status "stopped"/"killed", which is what
+ * `orphaned` keys off. Foreground agents return their report as the tool result, so
+ * they can never be orphaned.
+ */
+export interface AgentInfo {
+  agentId: string | null; // internal id (async dispatches only)
+  toolUseId: string;
+  description: string;
+  agentType: string | null;
+  background: boolean;
+  dispatchedAt: string | null;
+  endedAt: string | null;
+  status: "running" | "completed" | "stopped" | "failed" | "killed";
+  /** Started in the background and never came back: killed with the parent process. */
+  orphaned: boolean;
+}
+
 export interface SessionSummary {
   id: string;
   projectDir: string;
@@ -100,6 +125,8 @@ export interface SessionSummary {
   model: string | null;
   /** Reasoning effort of the newest assistant turn (low|medium|high|xhigh|max), if the CLI recorded one. */
   effort: string | null;
+  /** Sub-agents dispatched from this session, and whether each one actually landed. */
+  agents: AgentInfo[];
   createdAt: string | null;
   updatedAt: string | null;
   mtimeMs: number;
@@ -222,6 +249,10 @@ export function parseSession(filePath: string): FullSession {
   let version: string | null = null;
   let model: string | null = null;
   let effort: string | null = null;
+  // Agent dispatches, keyed both ways: by the tool_use that started them (to attach
+  // the launch result) and by agentId (to attach the completion notification).
+  const agentsByToolUse = new Map<string, AgentInfo>();
+  const agentsById = new Map<string, AgentInfo>();
   let createdAt: string | null = null;
   let updatedAt: string | null = null;
 
@@ -355,6 +386,21 @@ export function parseSession(filePath: string): FullSession {
           );
         } else if (b.type === 'tool_use') {
           const { target, targetKind } = summarizeTool(b.name, b.input);
+          if ((b.name === 'Agent' || b.name === 'Task') && b.id) {
+            agentsByToolUse.set(b.id, {
+              agentId: null,
+              toolUseId: b.id,
+              description: String(b.input?.description || b.input?.subagent_type || 'sub-agent'),
+              agentType: b.input?.subagent_type ? String(b.input.subagent_type) : null,
+              // The dispatch itself records this; the Agent tool defaults to background,
+              // so only an explicit false makes it a blocking (foreground) run.
+              background: b.input?.run_in_background !== false,
+              dispatchedAt: ts,
+              endedAt: null,
+              status: 'running',
+              orphaned: false,
+            });
+          }
           events.push(
             base('tool_call', o, ts, seq++, {
               tool: b.name,
@@ -386,6 +432,21 @@ export function parseSession(filePath: string): FullSession {
         for (const b of content) {
           if (b.type === 'tool_result') {
             const txt = resultText(b.content);
+            const agent = b.tool_use_id ? agentsByToolUse.get(b.tool_use_id) : undefined;
+            if (agent) {
+              // Both dispatch styles name the agent, so grab the id either way — it's
+              // what later notifications are keyed on. A foreground run's result IS
+              // the finished report, so it lands complete right here.
+              const m = /agentId:\s*([A-Za-z0-9_-]+)/.exec(txt);
+              if (m) {
+                agent.agentId = m[1];
+                agentsById.set(m[1], agent);
+              }
+              if (!agent.background) {
+                agent.status = b.is_error ? 'failed' : 'completed';
+                agent.endedAt = ts;
+              }
+            }
             events.push(
               base('tool_result', o, ts, seq++, {
                 forToolUseId: b.tool_use_id,
@@ -410,6 +471,18 @@ export function parseSession(filePath: string): FullSession {
     function pushPrompt(text: string) {
       const t = (text || '').trim();
       if (!t) return;
+      // <task-notification> closes the loop on background work. The same wrapper is
+      // used for background shell commands, so only ids we dispatched as agents count.
+      if (t.includes('<task-notification>')) {
+        const nid = /<task-id>\s*([^<\s]+)\s*<\/task-id>/.exec(t)?.[1];
+        const st = /<status>\s*([a-z_]+)\s*<\/status>/.exec(t)?.[1];
+        const ag = nid ? agentsById.get(nid) : undefined;
+        if (ag && (st === 'completed' || st === 'failed' || st === 'stopped' || st === 'killed')) {
+          ag.status = st;
+          ag.endedAt = ts;
+          ag.orphaned = st === 'stopped' || st === 'killed';
+        }
+      }
       // Injected = generated by the Claude Code harness, not typed by the human.
       // isMeta is Claude Code's own synthetic flag; isCompactSummary /
       // isVisibleInTranscriptOnly mark the post-compaction continuation summary
@@ -431,6 +504,23 @@ export function parseSession(filePath: string): FullSession {
     title = firstPrompt?.text?.slice(0, 80) || id.slice(0, 8);
   }
 
+  // Background agents with no notification either finished in-process (a completion
+  // notice is only written when a LATER process finds one missing) or were killed
+  // with the process. Their own transcript settles it — and settles it immediately,
+  // instead of waiting for the session to be resumed.
+  for (const a of agentsByToolUse.values()) {
+    if (!a.background || a.status !== 'running' || !a.agentId) continue;
+    const o = agentOutcome(filePath, a.agentId);
+    if (o.outcome === 'completed') {
+      a.status = 'completed';
+      if (!a.endedAt && o.lastWriteMs) a.endedAt = new Date(o.lastWriteMs).toISOString();
+    } else if (o.outcome === 'incomplete' && o.stale) {
+      a.status = 'stopped';
+      a.orphaned = true;
+      if (!a.endedAt && o.lastWriteMs) a.endedAt = new Date(o.lastWriteMs).toISOString();
+    }
+  }
+
   usage.totalTokens =
     usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
 
@@ -448,6 +538,7 @@ export function parseSession(filePath: string): FullSession {
     version,
     model,
     effort,
+    agents: [...agentsByToolUse.values()],
     createdAt,
     updatedAt,
     mtimeMs: stat.mtimeMs,

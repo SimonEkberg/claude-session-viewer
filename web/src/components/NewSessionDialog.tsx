@@ -3,7 +3,7 @@ import { api } from '../api';
 import type { LaunchResult, PeerCandidate } from '../types';
 import { DirectoryBrowser } from './DirectoryBrowser';
 import { PeerPicker } from './PeerPicker';
-import { EFFORTS, MODELS, PERMISSION_MODES } from '../constants';
+import { EFFORTS, MODELS, PERMISSION_MODES, type ModelChoice } from '../constants';
 import { useAttachedImages, ImageStrip } from '../attachments';
 
 /** Windows-friendly dir comparison: case-insensitive, slash- and trailing-sep-agnostic. */
@@ -15,12 +15,14 @@ function sameDir(a: string, b: string): boolean {
 export function NewSessionDialog({
   defaultCwd,
   home,
+  models = MODELS,
   onCwdChosen,
   onClose,
   onLaunched,
 }: {
   defaultCwd: string;
   home?: string; // the user's home dir, to warn when the cwd is just home
+  models?: ModelChoice[]; // live list from /api/models; static fallback otherwise
   onCwdChosen?: (cwd: string) => void; // remember the launched cwd as the next default
   onClose: () => void;
   onLaunched: (id: string) => void;
@@ -168,14 +170,16 @@ export function NewSessionDialog({
             <label>Model</label>
             <select
               value={model}
+              title={models.find((m) => m.v === model)?.hint}
               onChange={(e) => {
                 setModel(e.target.value);
                 clearPreview();
               }}
             >
-              {MODELS.map((m) => (
-                <option key={m.v} value={m.v}>
+              {models.map((m) => (
+                <option key={m.v} value={m.v} title={m.hint}>
                   {m.label}
+                  {m.hint ? ' *' : ''}
                 </option>
               ))}
             </select>

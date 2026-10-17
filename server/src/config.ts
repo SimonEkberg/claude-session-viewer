@@ -38,6 +38,19 @@ export const ALLOWED_LOGINS = (process.env.ALLOWED_LOGINS || '')
 export const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 
 /**
+ * How long a `claude -p` turn may keep waiting on still-running background work
+ * (sub-agents, background shell commands) after its reply is written, before the
+ * CLI gives up and exits — killing that work with it. The CLI's own default is a
+ * hard 10 minutes ("Background tasks still running after 600s; terminating"),
+ * which is what silently killed every >10-minute background reviewer agent.
+ * Default here: 60 minutes. 0 = wait indefinitely (the CLI's documented opt-out).
+ */
+export const BG_WAIT_CEILING_MS = (() => {
+  const n = Number(process.env.BG_WAIT_CEILING_MS);
+  return Number.isFinite(n) && n >= 0 ? n : 3_600_000;
+})();
+
+/**
  * Where the viewer keeps its own data: per-session peer allowlists (session
  * collaboration) and the generated per-session MCP config files. Kept out of the
  * repo and out of the transcript store.

@@ -25,5 +25,7 @@ jobs:
         run: npm run check
       - name: Typecheck server
         run: npx tsc -p server/tsconfig.json --noEmit
+      - name: Unit tests (parser, pricing, queue, validation)
+        run: npm test
       - name: Build web
         run: npm run build

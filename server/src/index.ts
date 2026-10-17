@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { PORT, HOST, CORS_ORIGINS, SESSIONS_ROOT, AUTH_MODE, ALLOWED_LOGINS } from './config.js';
 import { deleteSession, findFile, getSession, listProjects, listSessions, loadFile } from './index-store.js';
 import { buildReview, reviewToMarkdown } from './review.js';
-import { launchSession, resumeSession, expectedFilePath } from './launch.js';
+import { launchSession, resumeSession, expectedFilePath, validateModelMode } from './launch.js';
+import { clearQueued, getQueued, queuedCount, setQueued, startQueueRunner } from './queue.js';
+import { modelOptions } from './models.js';
 import { getPeers, setPeers } from './peers.js';
 import { listDir } from './fsbrowse.js';
 import { revealInFileManager } from './reveal.js';
@@ -50,6 +52,12 @@ app.get('/api/projects', (_req, res) => {
   // (loopback only — see the /api/reveal route). `home` lets the New-session dialog
   // warn when the chosen working directory is just your home folder.
   res.json({ sessionsRoot: SESSIONS_ROOT, home: os.homedir(), projects: listProjects(), reveal: AUTH_MODE === 'off' });
+});
+
+// Models the composer can offer: current curated lineup + everything observed in
+// the local transcripts (so new models appear without a code change).
+app.get('/api/models', (_req, res) => {
+  res.json(modelOptions());
 });
 
 app.get('/api/sessions', (req, res) => {
@@ -127,21 +135,32 @@ app.get('/api/sessions/:id/stream', (req, res) => {
   // Authoritative "Claude is working" signal: whether a claude process for this
   // session is currently running (survives the thinking phase, where the file is
   // quiet). Pushed on connect and whenever it flips.
-  const sendActivity = () => res.write(`event: activity\ndata: ${JSON.stringify({ active: isActive(id) })}\n\n`);
+  const sendActivity = () =>
+    res.write(`event: activity\ndata: ${JSON.stringify({ active: isActive(id), queued: queuedCount(id) })}\n\n`);
 
   send();
   sendActivity();
 
   // Coalesce bursty appends: parseSession re-reads the whole file synchronously, so
   // firing on every change during an active turn would starve the event loop and
-  // every other SSE client. A trailing debounce bounds that to ~1 parse / interval.
+  // every other SSE client. A trailing debounce bounds that to ~1 parse / interval,
+  // and the interval grows with the file: a 25 MB transcript parses in ~120 ms, so
+  // re-parsing it every 150 ms during a busy turn would eat a core for no visible
+  // gain. ~50 KB/ms keeps small sessions snappy and big ones at ≲1 parse/second.
   let pending: ReturnType<typeof setTimeout> | null = null;
+  const debounceMs = () => {
+    try {
+      return Math.min(1000, Math.max(150, Math.round(fs.statSync(file).size / 50_000)));
+    } catch {
+      return 150; // file not created yet
+    }
+  };
   const scheduleSend = () => {
     if (pending) return;
     pending = setTimeout(() => {
       pending = null;
       send();
-    }, 150);
+    }, debounceMs());
   };
 
   // ignoreInitial + watching a path that may not exist yet: 'add' fires when the CLI
@@ -187,9 +206,39 @@ app.post('/api/sessions/:id/prompt', (req, res) => {
   // turn is already running — two `claude --resume <id>` children appending the same
   // transcript concurrently corrupt it. (Same guard the DELETE route uses.)
   if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) return res.status(400).json({ error: 'invalid session id' });
-  if (isActive(id)) return res.status(409).json({ error: 'a turn is already running for this session' });
   const session = getSession(id);
   if (!session) return res.status(404).json({ error: 'session not found' });
+
+  // A turn is already running. Two `claude --resume <id>` children appending the same
+  // transcript corrupt it, so we can't just send — but the follow-up doesn't have to be
+  // thrown away either: park it and send it the moment this turn's process exits.
+  if (isActive(id)) {
+    if (!req.body?.queueIfBusy) {
+      return res.status(409).json({ error: 'a turn is already running for this session' });
+    }
+    const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt : '';
+    const images = Array.isArray(req.body?.images) ? req.body.images : undefined;
+    if (!prompt.trim() && !images?.length) {
+      return res.status(400).json({ error: 'prompt or an image is required' });
+    }
+    try {
+      // Validate now, so a bad model/effort fails while you're looking at it rather
+      // than silently at fire time, minutes later.
+      validateModelMode(req.body?.model, req.body?.permissionMode, req.body?.effort);
+    } catch (err) {
+      return res.status(400).json({ error: String(err instanceof Error ? err.message : err) });
+    }
+    const q = setQueued(id, {
+      prompt,
+      cwd: req.body?.cwd || session.cwd || process.cwd(),
+      model: req.body?.model,
+      effort: req.body?.effort,
+      permissionMode: req.body?.permissionMode,
+      images,
+    });
+    return res.json({ id, queued: true, queuedAt: q.queuedAt, spawned: false });
+  }
+
   try {
     const result = resumeSession(id, {
       prompt: req.body?.prompt,
@@ -204,6 +253,32 @@ app.post('/api/sessions/:id/prompt', (req, res) => {
   } catch (err) {
     res.status(400).json({ error: String(err instanceof Error ? err.message : err) });
   }
+});
+
+// The follow-up parked while a turn runs: what's waiting, and a way to call it off
+// before it fires.
+app.get('/api/sessions/:id/queue', (req, res) => {
+  const id = req.params.id;
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) return res.status(400).json({ error: 'invalid session id' });
+  const q = getQueued(id);
+  res.json({
+    queued: q
+      ? {
+          prompt: q.prompt,
+          queuedAt: q.queuedAt,
+          model: q.model ?? null,
+          effort: q.effort ?? null,
+          permissionMode: q.permissionMode ?? null,
+          images: q.images?.length ?? 0, // count only — the payload can be megabytes
+        }
+      : null,
+  });
+});
+
+app.delete('/api/sessions/:id/queue', (req, res) => {
+  const id = req.params.id;
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) return res.status(400).json({ error: 'invalid session id' });
+  res.json({ cleared: clearQueued(id) });
 });
 
 // Session collaboration allowlist (read-only peek). GET returns the current peers +
@@ -299,6 +374,9 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 // Fail closed before binding if the RCE endpoints would be exposed without the gate.
 assertSafeExposure();
+
+// Send parked follow-ups as soon as the turn they were waiting on exits.
+startQueueRunner();
 
 app.listen(PORT, HOST, () => {
   console.log(`claude-session-viewer server on http://${HOST}:${PORT}`);

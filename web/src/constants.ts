@@ -1,13 +1,42 @@
 // Shared option lists for the composer and New Session dialog.
 
-export const MODELS: { v: string; label: string }[] = [
+export interface ModelChoice {
+  v: string;
+  label: string;
+  hint?: string;
+}
+
+/**
+ * Offline fallback only — the live list comes from GET /api/models, which merges a
+ * curated current lineup with every model observed in the local transcripts. This
+ * static copy exists so the composer still works if that call fails.
+ * (Snapshot 2026-10-17.)
+ */
+export const MODELS: ModelChoice[] = [
   { v: '', label: 'Session default' },
+  { v: 'claude-opus-5-5', label: 'Opus 5.5', hint: 'needs Claude Code ≥ 2.1.280 (run: claude update)' },
+  { v: 'claude-fable-5-1', label: 'Fable 5.1' },
+  { v: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
+  { v: 'claude-haiku-5-5', label: 'Haiku 5.5' },
   { v: 'claude-opus-5', label: 'Opus 5' },
-  { v: 'claude-sonnet-5', label: 'Sonnet 5' },
   { v: 'claude-fable-5', label: 'Fable 5' },
+  { v: 'claude-sonnet-5', label: 'Sonnet 5' },
   { v: 'claude-haiku-4-5', label: 'Haiku 4.5' },
-  { v: 'claude-opus-4-8', label: 'Opus 4.8' },
 ];
+
+/** Build the composer's model list from the server's curated + observed sets. */
+export function mergeModelOptions(server?: {
+  curated: { id: string; label: string; note?: string }[];
+  observed: { id: string; label: string }[];
+} | null): ModelChoice[] {
+  if (!server) return MODELS;
+  const opts: ModelChoice[] = [{ v: '', label: 'Session default' }];
+  for (const c of server.curated) opts.push({ v: c.id, label: c.label, hint: c.note });
+  for (const o of server.observed) {
+    if (!opts.some((x) => x.v === o.id)) opts.push({ v: o.id, label: `${o.label} · seen locally` });
+  }
+  return opts;
+}
 
 /**
  * Friendly name for a model id read back out of a transcript. The picker above only

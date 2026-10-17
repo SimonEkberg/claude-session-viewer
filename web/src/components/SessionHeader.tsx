@@ -120,6 +120,8 @@ export function SessionHeader({
         </div>
       </div>
 
+      <OrphanedAgents session={session} />
+
       {!collapsed && (
         <>
       <div className="sh-meta">
@@ -211,6 +213,51 @@ function Stat({
       <span className="stat-n">{n}</span>
       <span className="stat-l">{label}</span>
     </button>
+  );
+}
+
+/**
+ * Background agents that never came back. They're killed when the session's process
+ * exits — which a one-shot `claude -p --resume` turn does shortly after it replies —
+ * and nothing in the transcript looks like an error, so without this the work just
+ * silently isn't there. Shown above the collapsible rows: it's the thing you need to
+ * know before you sit waiting for a report that isn't coming.
+ */
+function OrphanedAgents({ session }: { session: FullSession }) {
+  const [open, setOpen] = useState(false);
+  const orphaned = (session.agents || []).filter((a) => a.orphaned);
+  if (!orphaned.length) return null;
+  const n = orphaned.length;
+  return (
+    <div className="agent-warn">
+      <button className="agent-warn-head" onClick={() => setOpen((v) => !v)}>
+        <span className="agent-warn-icon">⚠</span>
+        <b>
+          {n} background agent{n === 1 ? '' : 's'} never finished
+        </b>
+        <span className="agent-warn-why">
+          killed when the turn's process exited — re-run with <code>run_in_background: false</code> so the turn
+          waits for it
+        </span>
+        <span className="agent-warn-caret">{open ? '▴' : '▾'}</span>
+      </button>
+      {open && (
+        <ul className="agent-warn-list">
+          {orphaned.map((a) => (
+            <li key={a.toolUseId}>
+              <span className="aw-desc">{a.description}</span>
+              {a.agentType && <span className="aw-type">{a.agentType}</span>}
+              <span className="aw-when">
+                {a.dispatchedAt ? new Date(a.dispatchedAt).toLocaleString() : 'unknown time'}
+                {a.endedAt && a.dispatchedAt
+                  ? ` · ran ${Math.round((Date.parse(a.endedAt) - Date.parse(a.dispatchedAt)) / 60000)} min`
+                  : ''}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
