@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -129,12 +129,46 @@ function feedInput(child: ChildProcess, prompt: string, images: PromptImage[]): 
   stdin.end();
 }
 
+// Live children per session, so an in-flight turn can be stopped from the UI.
+const liveChildren = new Map<string, Set<ChildProcess>>();
+
+/**
+ * Kill the running turn(s) of a session — the UI's ✕ on the "working in" card.
+ * Equivalent to closing the window on it: everything already written to the
+ * transcript stays (a torn final line is skipped by the parser), the activity
+ * signal flips to idle when the process exits, and any queued follow-up then
+ * sends as usual. With shell:true the spawned pid is the shell and `claude` is
+ * its child, so on Windows the whole TREE must go — plain kill() would stop
+ * cmd.exe and leave claude running headless.
+ */
+export function stopSession(id: string): boolean {
+  const set = liveChildren.get(id);
+  if (!set || set.size === 0) return false;
+  for (const child of [...set]) {
+    if (child.pid == null) continue;
+    try {
+      if (process.platform === 'win32') {
+        execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      } else {
+        child.kill('SIGTERM');
+      }
+    } catch {
+      /* already exited between the check and the kill */
+    }
+  }
+  return true;
+}
+
 function trackChild(child: ChildProcess, id: string, tag: string): void {
   markActive(id);
+  const set = liveChildren.get(id) ?? new Set<ChildProcess>();
+  set.add(child);
+  liveChildren.set(id, set);
   let done = false;
   const finish = () => {
     if (done) return;
     done = true;
+    set.delete(child);
     markInactive(id);
   };
   child.stdout?.on('data', (d) => {

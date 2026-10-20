@@ -2217,3 +2217,22 @@ body {
     display: none;
   }
 }
+
+/* Stop button on the "working in" card — only rendered when this server actually
+   holds the running process (a turn it launched/resumed), so ✕ always means
+   "I can really kill it", never a dead button on an externally driven session. */
+.wl-stop {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+.wl-stop:hover {
+  color: var(--error);
+  border-color: var(--error);
+}

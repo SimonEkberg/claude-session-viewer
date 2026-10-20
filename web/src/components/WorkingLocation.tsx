@@ -9,7 +9,7 @@ import type { FullSession, NormEvent } from '../types';
  * The point is to let you glance and confirm Claude is poking around the directory
  * you expect (e.g. searching the right repo), not somewhere unexpected.
  */
-export function WorkingLocation({ session }: { session: FullSession }) {
+export function WorkingLocation({ session, onStop }: { session: FullSession; onStop?: () => void }) {
   const cwd = session.cwd || '(working directory unknown)';
 
   // The most recent tool call is what Claude is doing right now (still pending) or
@@ -29,6 +29,15 @@ export function WorkingLocation({ session }: { session: FullSession }) {
     <div className="work-loc" role="status" aria-live="polite">
       <div className="work-loc-head">
         <span className="spinner" /> working in
+        {onStop && (
+          <button
+            className="wl-stop"
+            title="Stop this turn — kills the running claude process. Everything already written stays; a queued follow-up will then send."
+            onClick={onStop}
+          >
+            ✕
+          </button>
+        )}
       </div>
       <div className="work-loc-line">
         <span className="wl-path" title={cwd}>
