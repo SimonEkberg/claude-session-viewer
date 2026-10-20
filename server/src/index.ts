@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { PORT, HOST, CORS_ORIGINS, SESSIONS_ROOT, AUTH_MODE, ALLOWED_LOGINS } from './config.js';
 import { deleteSession, findFile, getSession, listProjects, listSessions, loadFile } from './index-store.js';
 import { buildReview, reviewToMarkdown } from './review.js';
-import { launchSession, resumeSession, expectedFilePath, validateModelMode } from './launch.js';
+import { launchSession, resumeSession, expectedFilePath, stopSession, validateModelMode } from './launch.js';
 import { clearQueued, getQueued, queuedCount, setQueued, startQueueRunner } from './queue.js';
 import { modelOptions } from './models.js';
 import { getPeers, setPeers } from './peers.js';
@@ -253,6 +253,23 @@ app.post('/api/sessions/:id/prompt', (req, res) => {
   } catch (err) {
     res.status(400).json({ error: String(err instanceof Error ? err.message : err) });
   }
+});
+
+// Stop an in-flight turn: kill the claude process (tree) the viewer spawned for this
+// session. Only turns started through this server can be stopped — it kills the
+// child it is holding, never an arbitrary pid. Note a queued follow-up still sends
+// when the killed turn's process exits, exactly as the queue chip promises.
+app.post('/api/sessions/:id/stop', (req, res) => {
+  const id = req.params.id;
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) return res.status(400).json({ error: 'invalid session id' });
+  if (!isActive(id)) return res.status(409).json({ error: 'no turn is running for this session' });
+  const stopped = stopSession(id);
+  if (!stopped) {
+    // Active per the counter but no child on hand (shouldn't happen — both are
+    // maintained by trackChild). Say so honestly rather than claiming success.
+    return res.status(500).json({ error: 'turn is active but its process handle is gone' });
+  }
+  res.json({ stopped: true });
 });
 
 // The follow-up parked while a turn runs: what's waiting, and a way to call it off

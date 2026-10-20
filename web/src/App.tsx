@@ -110,10 +110,25 @@ export function App() {
     return true;
   }, [session]);
 
+  // After an explicit Stop we KNOW nothing is running, but the transcript-based
+  // fallbacks would keep the chip lit for minutes: a killed turn never writes its
+  // missing tool_result (tailPending) and the kill itself triggers a snapshot
+  // (pulse). Suppress both until a real process signal re-lights things.
+  const [stopSuppress, setStopSuppress] = useState(false);
+  const onStopTurn = useCallback(async () => {
+    if (!selectedId) return;
+    try {
+      await api.stop(selectedId);
+      setStopSuppress(true);
+    } catch (e) {
+      alert(`Could not stop the turn: ${e instanceof Error ? e.message : e}`);
+    }
+  }, [selectedId]);
+
   // `serverActive` is authoritative for turns launched/resumed through this tool
   // (the CLI process is alive the whole turn, including thinking). pulse/tailPending
   // are the transcript-based fallback for sessions driven elsewhere.
-  const working = live && (serverActive || pulse || tailPending);
+  const working = live && (serverActive || ((pulse || tailPending) && !stopSuppress));
 
   const refreshList = useCallback(async () => {
     const [{ sessions }, { projects, sessionsRoot, home, reveal }] = await Promise.all([api.sessions(), api.projects()]);
@@ -180,6 +195,7 @@ export function App() {
   const onActivity = useCallback((a: { active: boolean; queued: number }) => {
     setServerActive(a.active);
     setQueuedCount(a.queued);
+    if (a.active) setStopSuppress(false); // a real turn started — stop suppressing
   }, []);
 
   const goLive = useCallback(
@@ -198,6 +214,7 @@ export function App() {
       setTab('timeline');
       setSelectedId(id);
       selectedIdRef.current = id;
+      setStopSuppress(false); // suppression is per open session
       // Opening a session acknowledges its "ready to continue" cue.
       setIdleReady((cur) => {
         if (!cur.has(id)) return cur;
@@ -320,7 +337,9 @@ export function App() {
               focus={focus}
               onInspect={setFocus}
             />
-            {tab === 'timeline' && working && <WorkingLocation session={session} />}
+            {tab === 'timeline' && working && (
+              <WorkingLocation session={session} onStop={live && serverActive ? onStopTurn : undefined} />
+            )}
             <div className="content-area">
               {tab === 'timeline' && (
                 <Timeline session={session} focus={focus} onClearFocus={() => setFocus(null)} />

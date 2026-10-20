@@ -128,6 +128,12 @@ export const api = {
       curated: { id: string; label: string; note?: string }[];
       observed: { id: string; label: string }[];
     }>('/api/models'),
+  /** Kill the in-flight turn (the claude process the viewer spawned). */
+  stop: async (id: string): Promise<{ stopped: boolean }> => {
+    const r = await fetch(`/api/sessions/${id}/stop`, { method: 'POST' });
+    if (!r.ok) throw new Error(await errText(r));
+    return r.json();
+  },
   /** The follow-up parked for this session, if any. */
   queue: (id: string) => j<{ queued: QueuedTurn | null }>(`/api/sessions/${id}/queue`),
   clearQueue: async (id: string): Promise<{ cleared: boolean }> => {
